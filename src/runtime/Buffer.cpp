@@ -15,7 +15,25 @@ void lingodb::runtime::DispatchBufferTask::run() {
    }
    auto& buffer = buffers[localStartIndex];
    utility::Tracer::Trace trace(iterateEvent);
-   cb(buffer);
+   auto splitSize = 20000;
+   if (buffer.numElements <= splitSize) {
+      cb(buffer);
+   } else {
+      printf("<<< buffer.numElements %lu\n", buffer.numElements);
+      for (size_t i = 0; i < buffer.numElements; i += splitSize) {
+         if (i != 0) {
+            scheduler::yieldOnCurrentWorker();
+         }
+         size_t begin = i;
+         size_t end = std::min(i + splitSize, buffer.numElements);
+         size_t len = end - begin;
+         // printf("  <<< begin %lu, %lu, %lu, %lu\n", buffer.numElements, begin, end, len);
+         auto buf = Buffer{len, buffer.ptr + begin * std::max(1ul, typeSize)};
+         cb(buf);
+         // printf("  <<< begin cb ended %lu\n", buffer.numElements);
+      }
+   }
+   
    trace.stop();
 }
 
@@ -48,7 +66,7 @@ void lingodb::runtime::BufferIterator::destroy(lingodb::runtime::BufferIterator*
    delete iterator;
 }
 void lingodb::runtime::FlexibleBuffer::iterateBuffersParallel(const std::function<void(Buffer)>& fn) {
-   lingodb::scheduler::awaitChildTask(std::make_unique<DispatchBufferTask>(buffers, fn));
+   lingodb::scheduler::awaitChildTask(std::make_unique<DispatchBufferTask>(buffers, typeSize, fn));
    // TODO IF NEED SPLIT FOR BUFFER SIZE > 20000
    /*
    tbb::parallel_for_each(buffers.begin(), buffers.end(), [&](Buffer buffer, tbb::feeder<Buffer>& feeder) {
@@ -115,10 +133,13 @@ void lingodb::runtime::Buffer::iterate(bool parallel, lingodb::runtime::Buffer b
    size_t len = buffer.numElements / typeSize;
 
    auto range = tbb::blocked_range<size_t>(0, len);
+   printf("<<< runtime::Buffer::iterate %lu\n", len);
    if (parallel) {
+      printf("  <<< runtime::Buffer::iterate parallel\n");
       // TODO: this is never triggered. parallel is set to false for window function
       lingodb::scheduler::awaitChildTask(std::make_unique<SplitBufferTask>(buffer, typeSize, contextPtr, forEachChunk));
    } else {
+      printf("  <<< runtime::Buffer::iterate no parallel\n");
       forEachChunk(buffer, 0, buffer.numElements / typeSize, contextPtr);
    }
 }

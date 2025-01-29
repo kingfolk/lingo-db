@@ -101,11 +101,12 @@ class FlexibleBuffer {
 // const std::function<void(T)> cb;
 class DispatchBufferTask : public lingodb::scheduler::Task {
    std::vector<Buffer>& buffers;
+   size_t typeSize;
    const std::function<void(Buffer)> cb;
    std::atomic<size_t> startIndex{0};
 
    public:
-   DispatchBufferTask(std::vector<Buffer>& buffers, const std::function<void(Buffer)> cb) : buffers(buffers), cb(cb) {}
+   DispatchBufferTask(std::vector<Buffer>& buffers, size_t typeSize, const std::function<void(Buffer)> cb) : buffers(buffers), typeSize(typeSize), cb(cb) {}
    void run() override;
 };
 

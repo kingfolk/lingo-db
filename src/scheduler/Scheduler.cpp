@@ -55,9 +55,16 @@ class Fiber {
       this->task = taskWrapper;
       done = false;
       isRunning = true;
+      // printf("&&& run isRunning = true\n");
       fiber = boost::context::fiber{std::allocator_arg, LocalAllocator{this}, [&](boost::context::fiber&& boostSink) {
                                        sink = std::move(boostSink);
+                                       // printf("???? before run %p\n", this);
                                        f();
+                                       // if (isRunning) {
+                                       //    printf("  ???? after run running %p\n", this);
+                                       // } else {
+                                       //    printf("  ???? after run yielded %p\n", this);
+                                       // }
                                        isRunning = false;
                                        done = true;
                                        return std::move(sink);
@@ -77,6 +84,7 @@ class Fiber {
    bool resume() {
       assert(!isRunning);
       assert(!done);
+      // printf("&&& resume isRunning = true\n");
       isRunning = true;
       fiber = std::move(fiber).resume();
       return done;
@@ -85,6 +93,7 @@ class Fiber {
    void yield() {
       assert(isRunning);
       assert(!done);
+      // printf("&&& yield isRunning = false %p\n", this);
       isRunning = false;
       sink = std::move(sink).resume();
    }
@@ -366,6 +375,10 @@ class Worker {
       fiber.yield();
    }
 
+   void yieldCurrentFiber() {
+      currentFiber->yield();
+   }
+
    void work() {
       while (!scheduler.isShutdown()) {
          {
@@ -383,17 +396,19 @@ class Worker {
                   scheduler.finalizeTask(task);
                }
             }
+            // printf("^^^^ handleFiberComplete\n");
             fiberAllocator.deallocate(std::move(currentFiber));
          };
          if (currentFiber) {
             if (currentFiber->resume()) {
+               // printf("  !!! currentFiber resume done\n");
                //unyield because it was previously registered as yielded
                if (currentFiber->getTask()) {
                   currentFiber->getTask()->unYieldFiber();
                }
                handleFiberComplete();
             }
-            assert(!currentFiber);
+            continue;
          }
          if (fiberAllocator.canAllocate()) {
             TaskWrapper* currTask = nullptr;
@@ -450,6 +465,7 @@ class Worker {
 static thread_local Worker* currentWorker;
 
 void SchedulerImpl::start() {
+   scheduler = this;
    for (size_t i = 0; i < numWorkers; i++) {
       workerThreads.emplace_back([this, i] {
          Worker worker(*this, i);
@@ -530,17 +546,19 @@ void TaskWrapper::finalize() {
 void awaitChildTask(std::unique_ptr<Task> task) {
    currentWorker->awaitChildTask(std::move(task));
 }
+void yieldOnCurrentWorker() {
+   currentWorker->yieldCurrentFiber();
+}
 std::unique_ptr<Scheduler> createScheduler(size_t numWorkers) {
    auto s = std::make_unique<SchedulerImpl>(numWorkers);
    s->start();
-   // TODO: not good
-   scheduler = s.get();
    return std::move(s);
 }
 void stopCurrentScheduler() {
    if (scheduler) {
       scheduler->stop();
    }
+   scheduler = nullptr;
 }
 
 size_t getNumWorkers() {

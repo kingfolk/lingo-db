@@ -24,6 +24,7 @@ class Scheduler {
 
 std::unique_ptr<Scheduler> createScheduler(size_t numWorkers = std::thread::hardware_concurrency());
 void stopCurrentScheduler();
+void yieldOnCurrentWorker();
 void awaitChildTask(std::unique_ptr<Task> task);
 
 
