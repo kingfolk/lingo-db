@@ -185,11 +185,13 @@ class SchedulerImpl : public Scheduler {
    void dequeueTaskLocked(TaskWrapper* task) {
       if (task->prev) {
          task->prev->next = task->next;
+         task->prev = nullptr;
       } else {
          taskHead = task->next;
       }
       if (task->next) {
          task->next->prev = task->prev;
+         task->next = nullptr;
       } else {
          taskTail = task->prev;
       }
