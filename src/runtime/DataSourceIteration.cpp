@@ -56,6 +56,7 @@ class ScanBatchesTask : public lingodb::scheduler::Task {
 
    public:
    ScanBatchesTask(std::vector<std::shared_ptr<arrow::RecordBatch>>& batches, std::vector<size_t> colIds, const std::function<void(lingodb::runtime::RecordBatchInfo*)>& cb) : batches(batches), colIds(colIds), cb(cb) {
+      this->fixedSize = batches.size();
       if (batches.size() == 1) {
          singleRun = true;
       }
@@ -75,6 +76,9 @@ class ScanBatchesTask : public lingodb::scheduler::Task {
       access(colIds, batchInfo, batch);
       cb(batchInfo);
       trace.stop();
+      if (localStartIndex == batches.size()-1) {
+         workExhausted.store(true);
+      }
    }
    ~ScanBatchesTask() {
       utility::Tracer::Trace cleanUpTrace(cleanupTLS);

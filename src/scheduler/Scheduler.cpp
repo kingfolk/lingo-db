@@ -114,6 +114,14 @@ struct TaskWrapper {
    }
 
    bool startFiber() {
+      if (task->isFixedSize()) {
+         auto hasNext = task->fetchNextFixedSizeUnit();
+         if (hasNext) {
+            nonCompletedFibers++;
+         }
+         return hasNext;
+      }
+
       if (task->hasWork()) {
          nonCompletedFibers++;
          return true;
