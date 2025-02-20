@@ -65,9 +65,10 @@ class ScanBatchesTask : public lingodb::scheduler::Task {
    }
    void run() override {
       size_t localStartIndex = startIndex.fetch_add(1);
-      if (localStartIndex >= batches.size()) {
+      if (localStartIndex >= batches.size()-1) {
+         // if `localStartIndex == batches.size()-1`, we early mark workExhausted to true prevent other worker call task `run`.
          workExhausted.store(true);
-         return;
+         if (localStartIndex >= batches.size()) return;
       }
       auto& batch = batches[localStartIndex];
       auto* batchInfo = batchInfos[lingodb::scheduler::currentWorkerId()];

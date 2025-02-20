@@ -132,7 +132,11 @@ class BufferIteratorTask : public lingodb::scheduler::Task {
    std::atomic<size_t> startIndex{0};
 
    public:
-   BufferIteratorTask(lingodb::runtime::Buffer& buffer, size_t typeSize, void* contextPtr, const std::function<void(lingodb::runtime::Buffer, size_t, size_t, void*)> cb) : buffer(buffer), bufferLen(buffer.numElements / typeSize), contextPtr(contextPtr), cb(cb) {}
+   BufferIteratorTask(lingodb::runtime::Buffer& buffer, size_t typeSize, void* contextPtr, const std::function<void(lingodb::runtime::Buffer, size_t, size_t, void*)> cb) : buffer(buffer), bufferLen(buffer.numElements / typeSize), contextPtr(contextPtr), cb(cb) {
+      if (splitSize >= bufferLen) {
+         singleRun = true;
+      }
+   }
    void run() override {
       size_t localStartIndex = startIndex.fetch_add(1);
       if (localStartIndex * splitSize >= bufferLen) {
