@@ -11,6 +11,9 @@
 #include "lingodb/scheduler/Task.h"
 
 namespace lingodb::scheduler {
+static utility::Tracer::Event taskRun("Scheduler", "taskRun");
+static utility::Tracer::Event fiberRun("Scheduler", "fiberRun");
+
 class Worker;
 
 struct TaskWrapper;
@@ -316,6 +319,8 @@ class Worker {
 
       public:
       explicit FiberAllocator(size_t maxFibers) : numAllocated(0), maxFibers(maxFibers) {
+         allocatedAndAvailableFibers.push_back(std::make_unique<Fiber>());
+         allocatedAndAvailableFibers.push_back(std::make_unique<Fiber>());
       }
 
       bool canAllocate() {
@@ -384,6 +389,14 @@ class Worker {
    }
 
    void awaitChildTask(std::unique_ptr<Task> task) {
+      if (task->workAmount() == 0) {
+         return;
+      } else if (task->workAmount() == 1) {
+         task->reserveWork();
+         task->consumeWork();
+         return;
+      }
+
       TaskWrapper* taskWrapper = new TaskWrapper{std::move(task)};
       Fiber& fiber = *currentFiber;
       taskWrapper->waitingOnTaskCompletion = std::move(currentFiber);

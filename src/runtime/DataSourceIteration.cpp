@@ -62,6 +62,9 @@ class ScanBatchesTask : public lingodb::scheduler::Task {
          workerResvs.push_back(0);
       }
    }
+   size_t workAmount() override {
+      return batches.size();
+   }
    bool reserveWork() override {
       size_t localStartIndex = startIndex.fetch_add(1);
       if (localStartIndex >= batches.size()) {
