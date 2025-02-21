@@ -114,8 +114,8 @@ struct TaskWrapper {
    }
 
    bool startFiber() {
-      if (task->hasWork()) {
-         nonCompletedFibers++;
+      nonCompletedFibers++;
+      if (task->hasWork() && task->reserveWork()) {
          return true;
       }
       return false;
@@ -384,11 +384,6 @@ class Worker {
    }
 
    void awaitChildTask(std::unique_ptr<Task> task) {
-      if (task->onlySingleRun()) {
-         task->run();
-         return;
-      }
-
       TaskWrapper* taskWrapper = new TaskWrapper{std::move(task)};
       Fiber& fiber = *currentFiber;
       taskWrapper->waitingOnTaskCompletion = std::move(currentFiber);
@@ -448,6 +443,9 @@ class Worker {
 
             if (currTask) {
                if (!currTask->startFiber()) {
+                  if (currTask->finishFiber()) {
+                     scheduler.finalizeTask(currTask);
+                  }
                   scheduler.returnTask(currTask);
                   continue;
                }
@@ -456,7 +454,7 @@ class Worker {
                currentFiber = fiberAllocator.allocate();
                assert(currentFiber);
                auto fiberDone = currentFiber->run(this, currTask, [&] {
-                  currTask->task->run();
+                  currTask->task->consumeWork();
                });
                if (fiberDone) {
                   this->startWait = TimePoint::min();
