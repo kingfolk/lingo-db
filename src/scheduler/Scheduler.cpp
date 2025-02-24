@@ -487,15 +487,16 @@ class Worker {
 
                continue;
             } else {
-               if (this->startWait == TimePoint::min()) {
-                  this->startWait = std::chrono::high_resolution_clock::now();
-               }
-               auto endWait = std::chrono::high_resolution_clock::now();
-               auto dur = std::chrono::duration_cast<std::chrono::microseconds>(endWait - this->startWait).count() / 1000.0;
-               if (dur > scheduler.getDebounceWorkerSleep()) {
-                  this->startWait = TimePoint::min();
-                  scheduler.putWorkerToSleep(this);
-               }
+               scheduler.putWorkerToSleep(this);
+               // if (this->startWait == TimePoint::min()) {
+               //    this->startWait = std::chrono::high_resolution_clock::now();
+               // }
+               // auto endWait = std::chrono::high_resolution_clock::now();
+               // auto dur = std::chrono::duration_cast<std::chrono::microseconds>(endWait - this->startWait).count() / 1000.0;
+               // if (dur > scheduler.getDebounceWorkerSleep()) {
+               //    this->startWait = TimePoint::min();
+               //    scheduler.putWorkerToSleep(this);
+               // }
             }
 
          } else {
