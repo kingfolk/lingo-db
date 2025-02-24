@@ -101,7 +101,8 @@ struct TaskWrapper {
    std::unique_ptr<Task> task;
 
    std::atomic<bool> coolingDown = false;
-   bool finalized = false;
+   // TODO if should remove std::atomic
+   std::atomic<bool> finalized = false;
    TaskWrapper* next = nullptr;
    TaskWrapper* prev = nullptr;
    std::atomic<int64_t> yieldedFibers = 0;
@@ -117,10 +118,22 @@ struct TaskWrapper {
    }
 
    bool startFiber() {
+      printf("*** startFiber %p %lu %lu %d\n ", this, nonCompletedFibers.load(), currentWorkerId(), task->hasWork());
+      if (!task->hasWork()) {
+         return false;
+      }
+      // plus 1 for potential non completed fiber. `nonCompletedFibers++` ahead of reserveWork prevent scenario like
+      //   worker 1: reserveWork  ----    [somehow long gap]     ----   nonCompletedFibers++   ---- consumeWork
+      //                                                            |
+      //                                                            |--- finishFiber[true] -> finalizeTask called
+      //   worker 2: reserveWork ---- nonCompletedFibers++ ---- consumeWork
+      //   
+      //   worker 1's comsumeWork is called after task is finalized, which cause sql wrong result or memory issue.
       nonCompletedFibers++;
-      if (task->hasWork() && task->reserveWork()) {
+      if (task->reserveWork()) {
          return true;
       }
+      nonCompletedFibers--;
       return false;
    }
 
@@ -254,7 +267,7 @@ class Scheduler {
       // but another worker is still at `task->finalized`
       std::lock_guard<std::mutex> lock(taskReturnMutex);
       auto deployedNum = task->deployedOnWorkers.fetch_sub(1);
-      if (task->finalized) {
+      if (task->finalized.load()) {
          if (deployedNum == 1) {
             if (task->beforeDestroyFn) {
                task->beforeDestroyFn();
@@ -265,6 +278,9 @@ class Scheduler {
    }
 
    void finalizeTask(TaskWrapper* task) {
+      if (task->finalized.exchange(true)) {
+         return;
+      }
       if (task->coolingDown) {
          //simple case: already in cooling down queue
          // -> only need to lock cooling down queue
@@ -307,7 +323,6 @@ class Scheduler {
          }
       }
       task->finalize();
-      task->finalized = true;
    }
 };
 
@@ -458,7 +473,16 @@ class Worker {
 
             if (currTask) {
                if (!currTask->startFiber()) {
-                  if (currTask->finishFiber()) {
+                  // when task has no work and nonCompletedFibers is zero, which means no possible 
+                  // for new run all runs are done, it is safe to finalize a task.
+                  // We must add a `finalizeTask` here. Imagine a task of 2 workload unit and only 1 thread.
+                  // [ reserveWork, consumeWork,
+                  //   reserveWork, consumeWork] are called sequentially.
+                  // After the second consumeWork, `finishFiber` is called and `hasWork` may should return true
+                  // because a third reserveWork will set work to exhausted. But there will not be a third consumeWork
+                  // call. We need add a extra exhausted check after reserveWork check and finalizeTask if there
+                  // is no more work to do.
+                  if (currTask->nonCompletedFibers.load() == 0) {
                      scheduler.finalizeTask(currTask);
                   }
                   scheduler.returnTask(currTask);
