@@ -319,8 +319,10 @@ class Worker {
 
       public:
       explicit FiberAllocator(size_t maxFibers) : numAllocated(0), maxFibers(maxFibers) {
+#ifdef TRACER
          allocatedAndAvailableFibers.push_back(std::make_unique<Fiber>());
          allocatedAndAvailableFibers.push_back(std::make_unique<Fiber>());
+#endif
       }
 
       bool canAllocate() {
@@ -544,8 +546,8 @@ void Scheduler::stop() {
 }
 
 void Scheduler::enqueueTask(TaskWrapper* wrapper) {
+   std::lock_guard<std::mutex> lock(taskQueueMutex);
    {
-      std::lock_guard<std::mutex> lock(taskQueueMutex);
       if (taskTail) {
          taskTail->next = wrapper;
          wrapper->prev = taskTail;
@@ -555,7 +557,6 @@ void Scheduler::enqueueTask(TaskWrapper* wrapper) {
          taskTail = wrapper;
       }
    }
-   std::lock_guard<std::mutex> lock(taskQueueMutex);
    size_t cntr = 0;
    while (idleWorkers) {
       assert(cntr++ < numWorkers);
