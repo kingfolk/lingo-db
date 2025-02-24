@@ -118,7 +118,6 @@ struct TaskWrapper {
    }
 
    bool startFiber() {
-      printf("*** startFiber %p %lu %lu %d\n ", this, nonCompletedFibers.load(), currentWorkerId(), task->hasWork());
       if (!task->hasWork()) {
          return false;
       }
