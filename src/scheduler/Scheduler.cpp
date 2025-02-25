@@ -462,25 +462,18 @@ class Worker {
                }
                // Step 2. try reserve a piece of work.
                if (!currTask->task->reserveWork()) {
-                  // When task has no more work can be reserved and nonCompletedFibers is zero
-                  // (finishFiber is true), which means no possible for new run and all runs are 
-                  // done, it is safe to finalize a task.
-                  // 
-                  // An extra reserveWork call is necessary:
-                  // Imagine a task of 2 workload unit and only 1 thread.
-                  // [ reserveWork, consumeWork,
-                  //   reserveWork, consumeWork] are called sequentially.
-                  // After the second consumeWork, `finishFiber` is called and `hasWork` still is true.
-                  // Althought it has no more work. A third reserveWork will set work to exhausted.
-                  // But there will not be a third consumeWork call. 
-                  // 
-                  // `finalizeTask` is called only once:
-                  // - scenario 1: 1 worker inside this if block, other workers are all before startFiber
-                  //     call. Because reserveWork is return false and work is exhausted, all other workers
-                  //     will have to return the taks
-                  // - scenario 2: there are few workers inside this if block or after startFiber. nonCompletedFibers
-                  //     is bigger than 1. They called finishFiber sequentially. Eventually only 1 worker end
-                  //     up with finishFiber is true so that finalizeTask is only called once.
+                  // reserveWork false and finishFiber true means no possible for new run and all
+                  // runs are done. Then it is safe to finalize a task.
+                  // ## An extra reserveWork call is necessary:
+                  // Imagine a task of 2 unit and 1 thread. [reserveWork, consumeWork,
+                  //                                         reserveWork, consumeWork] called sequentially
+                  // After the second consumeWork, finishFiber in `handleFiberComplete` still return 
+                  // true Althought it has no more work. A third reserveWork will set work to exhausted.
+                  // ## `finalizeTask` is called only once:
+                  // - scenario 1: 1 worker inside this if, other workers are before startFiber. Because
+                  //     work is already exhausted, all other workers will have startFiber return false.
+                  // - scenario 2: there are few workers inside this if or after startFiber(nonCompletedFibers>0)
+                  //     Only last worker end up with finishFiber return true.
                   if (currTask->finishFiber()) {
                      scheduler.finalizeTask(currTask);
                   }
@@ -569,8 +562,8 @@ void Scheduler::stop() {
 }
 
 void Scheduler::enqueueTask(TaskWrapper* wrapper) {
-   std::lock_guard<std::mutex> lock(taskQueueMutex);
    {
+      std::lock_guard<std::mutex> lock(taskQueueMutex);
       if (taskTail) {
          taskTail->next = wrapper;
          wrapper->prev = taskTail;
@@ -580,6 +573,7 @@ void Scheduler::enqueueTask(TaskWrapper* wrapper) {
          taskTail = wrapper;
       }
    }
+   std::lock_guard<std::mutex> lock(taskQueueMutex);
    size_t cntr = 0;
    while (idleWorkers) {
       assert(cntr++ < numWorkers);
