@@ -11,9 +11,6 @@
 #include "lingodb/scheduler/Task.h"
 
 namespace lingodb::scheduler {
-static utility::Tracer::Event taskRun("Scheduler", "taskRun");
-static utility::Tracer::Event fiberRun("Scheduler", "fiberRun");
-
 class Worker;
 
 struct TaskWrapper;

@@ -6,31 +6,6 @@ namespace {
 static utility::Tracer::Event iterateEvent("FlexibleBuffer", "iterateParallel");
 static utility::Tracer::Event bufferIteratorEvent("BufferIterator", "iterate");
 
-class FlexibleBufferWorkerLocalState {
-   public:
-   std::mutex mutex;
-   bool hasMore{false};
-   size_t unitId{0};
-   size_t unitAmount;
-   size_t bufferId;
-   // workerId steal task from
-   size_t stealWorkerId{std::numeric_limits<size_t>::max()};
-
-   int fetchAndNext() {
-      size_t cur;
-      {
-         std::lock_guard<std::mutex> stateLock(this->mutex);
-         cur = unitId;
-         unitId++;
-         hasMore = unitId < unitAmount;
-      }
-      if (cur >= unitAmount) {
-         return -1;
-      }
-      return cur;
-   }
-};
-
 class FlexibleBufferWorkerResvState {
 public:
    size_t bufferId;
@@ -63,13 +38,11 @@ class FlexibleBufferIteratorTask : public lingodb::scheduler::Task {
    const std::function<void(lingodb::runtime::Buffer)> cb;
    std::atomic<size_t> startIndex{0};
    size_t splitSize{20000};
-   // std::vector<std::unique_ptr<FlexibleBufferWorkerLocalState>> workerLocalStates;
    std::vector<std::unique_ptr<FlexibleBufferWorkerResvState>> workerResvs;
 
    public:
    FlexibleBufferIteratorTask(std::vector<lingodb::runtime::Buffer>& buffers, size_t typeSize, const std::function<void(lingodb::runtime::Buffer)> cb) : buffers(buffers), typeSize(typeSize), cb(cb) {
       for (size_t i = 0; i < lingodb::scheduler::getNumWorkers(); i++) {
-         // workerLocalStates.emplace_back(std::make_unique<FlexibleBufferWorkerLocalState>());
          workerResvs.emplace_back(std::make_unique<FlexibleBufferWorkerResvState>());
       }
    }
@@ -87,20 +60,21 @@ class FlexibleBufferIteratorTask : public lingodb::scheduler::Task {
    }
 
    bool reserveWork() override {
-      // printf("<<<< FlexibleBufferIteratorTask reserveWork %lu\n", lingodb::scheduler::currentWorkerId());
       // quick check for exhaust. workExhausted is true if there is no more buffer or no more
       // work unit in own local state or steal from other workers.
       if (workExhausted.load()) {
-         // printf("  <<<< FlexibleBufferIteratorTask reserveWork no work %lu\n", lingodb::scheduler::currentWorkerId());
          return false;
       }
 
+      //1. if the current worker has more work locally, do it
       auto* state = workerResvs[lingodb::scheduler::currentWorkerId()].get();
       auto id = state->fetchAndNext();
       if (id != -1) {
          state->resvId = id;
          return true;
       }
+
+      //2. if the current worker has no more work locally, try to allocate new work
       size_t localStartIndex = startIndex.fetch_add(1);
       if (localStartIndex < buffers.size()) {
          auto& buffer = buffers[localStartIndex];
@@ -116,7 +90,7 @@ class FlexibleBufferIteratorTask : public lingodb::scheduler::Task {
          }
          return true;  
       }
-
+      //3. if the current worker has no more work locally and no more work globally, try to steal work from the worker we stole from last time
       if (state->stealWorkerId != std::numeric_limits<size_t>::max()) {
          auto* other = workerResvs[state->stealWorkerId].get();
          if (other->hasMore) {
@@ -145,11 +119,9 @@ class FlexibleBufferIteratorTask : public lingodb::scheduler::Task {
       }
 
       workExhausted.store(true);
-      // printf("  <<<< FlexibleBufferIteratorTask reserveWork no work %lu\n", lingodb::scheduler::currentWorkerId());
       return false;
    }
    void consumeWork() override {
-      // printf("**** FlexibleBufferIteratorTask consumeWork %lu\n", lingodb::scheduler::currentWorkerId());
       auto* state = workerResvs[lingodb::scheduler::currentWorkerId()].get();
       if (state->stealWorkerId != std::numeric_limits<size_t>::max()) {
          auto* other = workerResvs[state->stealWorkerId].get();

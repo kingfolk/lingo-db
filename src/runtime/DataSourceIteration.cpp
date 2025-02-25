@@ -75,7 +75,6 @@ class ScanBatchesTask : public lingodb::scheduler::Task {
       return true;
    }
    void consumeWork() override {
-      // printf("<<< workerResvs[lingodb::scheduler::currentWorkerId()] %lu\n", workerResvs[lingodb::scheduler::currentWorkerId()]);
       auto& batch = batches[workerResvs[lingodb::scheduler::currentWorkerId()]];
       auto* batchInfo = batchInfos[lingodb::scheduler::currentWorkerId()];
       utility::Tracer::Trace trace(processMorsel);
