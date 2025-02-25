@@ -114,21 +114,10 @@ struct TaskWrapper {
    }
 
    bool startFiber() {
-      if (!task->hasWork()) {
-         return false;
-      }
-      // plus 1 for potential non completed fiber. `nonCompletedFibers++` ahead of reserveWork prevent scenario like
-      //   worker 1: reserveWork  ----    [somehow long gap]     ----   nonCompletedFibers++   ---- consumeWork
-      //                                                            |
-      //                                                            |--- finishFiber[true] -> finalizeTask called
-      //   worker 2: reserveWork ---- nonCompletedFibers++ ---- consumeWork
-      //   
-      //   worker 1's comsumeWork is called after task is finalized, which cause sql wrong result or memory issue.
-      nonCompletedFibers++;
-      if (task->reserveWork()) {
+      if (task->hasWork()) {
+         nonCompletedFibers++;
          return true;
       }
-      nonCompletedFibers--;
       return false;
    }
 
@@ -465,17 +454,34 @@ class Worker {
             }
 
             if (currTask) {
+               // Step 1. try startFiber. it's possible task is already exhausted. Task should be
+               // return if exhausted.
                if (!currTask->startFiber()) {
-                  // when task has no work and nonCompletedFibers is zero, which means no possible 
-                  // for new run all runs are done, it is safe to finalize a task.
-                  // We must add a `finalizeTask` here. Imagine a task of 2 workload unit and only 1 thread.
+                  scheduler.returnTask(currTask);
+                  continue;
+               }
+               // Step 2. try reserve a piece of work.
+               if (!currTask->task->reserveWork()) {
+                  // When task has no more work can be reserved and nonCompletedFibers is zero
+                  // (finishFiber is true), which means no possible for new run and all runs are 
+                  // done, it is safe to finalize a task.
+                  // 
+                  // An extra reserveWork call is necessary:
+                  // Imagine a task of 2 workload unit and only 1 thread.
                   // [ reserveWork, consumeWork,
                   //   reserveWork, consumeWork] are called sequentially.
-                  // After the second consumeWork, `finishFiber` is called and `hasWork` may should return true
-                  // because a third reserveWork will set work to exhausted. But there will not be a third consumeWork
-                  // call. We need add a extra exhausted check after reserveWork check and finalizeTask if there
-                  // is no more work to do.
-                  if (currTask->nonCompletedFibers.load() == 0) {
+                  // After the second consumeWork, `finishFiber` is called and `hasWork` still is true.
+                  // Althought it has no more work. A third reserveWork will set work to exhausted.
+                  // But there will not be a third consumeWork call. 
+                  // 
+                  // `finalizeTask` is called only once:
+                  // - scenario 1: 1 worker inside this if block, other workers are all before startFiber
+                  //     call. Because reserveWork is return false and work is exhausted, all other workers
+                  //     will have to return the taks
+                  // - scenario 2: there are few workers inside this if block or after startFiber. nonCompletedFibers
+                  //     is bigger than 1. They called finishFiber sequentially. Eventually only 1 worker end
+                  //     up with finishFiber is true so that finalizeTask is only called once.
+                  if (currTask->finishFiber()) {
                      scheduler.finalizeTask(currTask);
                   }
                   scheduler.returnTask(currTask);
@@ -484,6 +490,7 @@ class Worker {
                //work on (part of) (new) task
                currentFiber = fiberAllocator.allocate();
                assert(currentFiber);
+               // Step 3. consume reserved work
                auto fiberDone = currentFiber->run(this, currTask, [&] {
                   currTask->task->consumeWork();
                });
