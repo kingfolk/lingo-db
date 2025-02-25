@@ -98,8 +98,7 @@ struct TaskWrapper {
    std::unique_ptr<Task> task;
 
    std::atomic<bool> coolingDown = false;
-   // TODO if should remove std::atomic
-   std::atomic<bool> finalized = false;
+   bool finalized = false;
    TaskWrapper* next = nullptr;
    TaskWrapper* prev = nullptr;
    std::atomic<int64_t> yieldedFibers = 0;
@@ -263,7 +262,7 @@ class Scheduler {
       // but another worker is still at `task->finalized`
       std::lock_guard<std::mutex> lock(taskReturnMutex);
       auto deployedNum = task->deployedOnWorkers.fetch_sub(1);
-      if (task->finalized.load()) {
+      if (task->finalized) {
          if (deployedNum == 1) {
             if (task->beforeDestroyFn) {
                task->beforeDestroyFn();
@@ -319,6 +318,7 @@ class Scheduler {
          }
       }
       task->finalize();
+      task->finalized = true;
    }
 };
 
@@ -484,7 +484,6 @@ class Worker {
                   scheduler.returnTask(currTask);
                   continue;
                }
-               // if (currTask && currTask->startFiber()) {
                //work on (part of) (new) task
                currentFiber = fiberAllocator.allocate();
                assert(currentFiber);
