@@ -273,9 +273,6 @@ class Scheduler {
    }
 
    void finalizeTask(TaskWrapper* task) {
-      if (task->finalized.exchange(true)) {
-         return;
-      }
       if (task->coolingDown) {
          //simple case: already in cooling down queue
          // -> only need to lock cooling down queue
