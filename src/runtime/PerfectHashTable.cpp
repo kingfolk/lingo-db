@@ -153,7 +153,8 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::buildPerfe
             size_t h2 = ph->universalHash(key.data(), key.size(), auxHashParams[1], true);
             
             // Calculate the FCH index: (h1 + g[h2]) % tableSize
-            size_t displ = std::min(displ = ph->g[h2], size_t(0));
+            size_t displ = 0;
+            if (ph->g[h2] != gEmpty) displ = ph->g[h2];
             size_t idx = (h1 + displ) % tableSize;
             
             // If there's a collision, resolve it by adjusting g[h2]
@@ -163,9 +164,7 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::buildPerfe
                 if (ph->g[h2] == gEmpty) {
                     // Try different values for g[h2] until collision is resolved
                     found = tryDisplacement(h1, h2);
-                }
-
-                
+                }                
                 
                 // displacement is already taken or failed to displace. rebuild whole table
                 if (found == -1) {
@@ -174,7 +173,7 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::buildPerfe
                 
                 ph->g[h2] = found;
                 idx = (h1 + ph->g[h2]) % tableSize;
-            } else {
+            } else if (ph->g[h2] == gEmpty) {
                 ph->g[h2] = 0;
             }
             
