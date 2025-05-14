@@ -2105,17 +2105,15 @@ class ScanPerfectHashTableListLowering : public SubOpConversionPattern<subop::Sc
 
       auto referenceType = mlir::cast<subop::ListType>(scanOp.getList().getType()).getT();
       auto tupleType = mlir::TupleType::get(getContext(), unpackTypes(referenceType.getMembers().getTypes()));
-      Value castedPtr = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(getContext(), mlir::TupleType::get(getContext(), {rewriter.getI1Type(), rewriter.getIndexType(), tupleType})), ptr);
-      Value emptyPtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), rewriter.getI1Type()), castedPtr, 0);
-      Value hashPtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), rewriter.getIndexType()), castedPtr, 1);
+      Value castedPtr = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(getContext(), mlir::TupleType::get(getContext(), {rewriter.getIndexType(), rewriter.getIndexType(), tupleType})), ptr);
+      Value hashPtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), rewriter.getIndexType()), castedPtr, 0);
+      // TODO
+      // Value sndHashPtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), rewriter.getIndexType()), castedPtr, 1);
       Value valuePtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), tupleType), castedPtr, 2);
       mlir::Value currHash = rewriter.create<util::LoadOp>(loc, hashPtr, mlir::Value());
       mlir::Value hashEq = rewriter.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, currHash, hash);
-      Value emptyVal = rewriter.create<util::LoadOp>(loc, emptyPtr, mlir::Value());
-      mlir::Value notEmpty = rewriter.create<db::NotOp>(loc, emptyVal);
-      mlir::Value anded = rewriter.create<db::AndOp>(loc, std::vector<mlir::Value>{notEmpty, hashEq});
       rewriter.create<mlir::scf::IfOp>(
-         loc, anded, [&](mlir::OpBuilder& builder1, mlir::Location loc) {
+         loc, hashEq, [&](mlir::OpBuilder& builder1, mlir::Location loc) {
             mapping.define(scanOp.getElem(), valuePtr);
             rewriter.replaceTupleStream(scanOp, mapping);
             builder1.create<mlir::scf::YieldOp>(loc);
@@ -2386,12 +2384,14 @@ class LookupPerfectHashTableLowering : public SubOpTupleStreamConsumerConversion
       mlir::Value key = mapping.resolve(lookupOp, lookupOp.getKeys())[0];
 
       // TODO AllocOp SLOW. USE IR INSTEAD OF computeHash
-      // auto i8PtrType = util::RefType::get(getContext(), rewriter.getI8Type());
-      // Value arg1 = rewriter.create<util::AllocOp>(loc, util::RefType::get(i8PtrType), rewriter.create<mlir::arith::ConstantIndexOp>(loc, 16));
-      // rewriter.create<util::StoreOp>(loc, key, arg1, mlir::Value());
-      // Value hash = rt::PerfectHashView::computeHash(rewriter, loc)({adaptor.getState(), arg1})[0];
-      // Value ptr = rt::PerfectHashView::containHash(rewriter, loc)({adaptor.getState(), hash})[0];
-      // hash = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), hash);
+      // TODO the following several line produce correct result
+      auto i8PtrType = util::RefType::get(getContext(), rewriter.getI8Type());
+      Value arg1 = rewriter.create<util::AllocOp>(loc, util::RefType::get(i8PtrType), rewriter.create<mlir::arith::ConstantIndexOp>(loc, 16));
+      rewriter.create<util::StoreOp>(loc, key, arg1, mlir::Value());
+      Value hash = rt::PerfectHashView::computeHash(rewriter, loc)({adaptor.getState(), arg1})[0];
+      Value bucket = rt::PerfectHashView::computeBucket(rewriter, loc)({adaptor.getState(), hash})[0];
+      Value ptr = rt::PerfectHashView::computeEntry(rewriter, loc)({adaptor.getState(), arg1, bucket})[0];
+      hash = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), hash);
 
       // TODO this is a WIP IR solution
       // auto htType = util::RefType::get(context, util::RefType::get(context, rewriter.getI8Type()));
@@ -2409,9 +2409,9 @@ class LookupPerfectHashTableLowering : public SubOpTupleStreamConsumerConversion
       // mlir::Value hash = rewriter.create<util::LoadOp>(loc, hashPtr, mlir::Value());
 
       // TODO DELETE THIS DRY RUN
-      Value ptr = rt::PerfectHashView::dryRun(rewriter, loc)({adaptor.getState()})[0];
-      Value hash = rt::PerfectHashView::dryRunHash(rewriter, loc)({adaptor.getState()})[0];
-      hash = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), hash);
+      // Value ptr = rt::PerfectHashView::dryRun(rewriter, loc)({adaptor.getState()})[0];
+      // Value hash = rt::PerfectHashView::dryRunHash(rewriter, loc)({adaptor.getState()})[0];
+      // hash = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), hash);
 
       // TODO DELETE THIS DRY RUN ONE CALL
       // Value ptr = rt::PerfectHashView::dryRun(rewriter, loc)({adaptor.getState()})[0];
@@ -2420,6 +2420,21 @@ class LookupPerfectHashTableLowering : public SubOpTupleStreamConsumerConversion
       // mlir::Value hash = rewriter.create<util::LoadOp>(loc, hashPtr, mlir::Value());
 
       Value matches = rewriter.create<util::PackOp>(loc, ValueRange{ptr, hash});
+
+
+      // scf::if bucket.m == 1
+      //   ptr = table[bucket.offset]
+      // else
+      //   calc tablePos
+      //   ptr = table[tablePos]
+      // 
+      // ptr structure: {hash_b: index, hash_t: index, key: db::string}
+      // ptr could be a empty value due to bucket is empty or tablePos point to a empty slot.
+      // empty ptr has hash_b and hash_t = 0.
+      // if empty, ptr.hash_b will not equal to hash of lookup key.
+      // Value matches = rewriter.create<util::PackOp>(loc, ValueRange{ptr, hash1, hash2});
+
+
 
       mapping.define(lookupOp.getRef(), matches);
       rewriter.replaceTupleStream(lookupOp, mapping);

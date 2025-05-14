@@ -308,11 +308,23 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
       // TODO RENAME
       mlir::Value gbuffer;
       auto gMember = memberManager.getUniqueMember("g");
+      auto gMember2 = memberManager.getUniqueMember("g2");
+      auto gMember3 = memberManager.getUniqueMember("g3");
+      auto gMember4 = memberManager.getUniqueMember("g4");
       auto generateGValues = [&](lingodb::runtime::PerfectHashView* ht) {
          auto [gDef, gRef] = createColumn(rewriter.getI64Type(), "constg", "g");
+         auto [gDef2, gRef2] = createColumn(rewriter.getI64Type(), "constg", "g2");
+         auto [gDef3, gRef3] = createColumn(rewriter.getI64Type(), "constg", "g3");
+         auto [gDef4, gRef4] = createColumn(rewriter.getI64Type(), "constg", "g4");
 
-         std::vector<mlir::Attribute> memNames{rewriter.getStringAttr(gMember)};
-         std::vector<mlir::Attribute> memTypes{mlir::TypeAttr::get(rewriter.getI64Type())};
+         std::vector<mlir::Attribute> memNames{
+            rewriter.getStringAttr(gMember),
+            rewriter.getStringAttr(gMember2),
+            rewriter.getStringAttr(gMember3),
+            rewriter.getStringAttr(gMember4),
+         };
+         auto intType = mlir::TypeAttr::get(rewriter.getI32Type());
+         std::vector<mlir::Attribute> memTypes{intType, intType, intType, intType};
          auto bufferType = subop::BufferType::get(rewriter.getContext(), subop::StateMembersAttr::get(getContext(), rewriter.getArrayAttr(memNames), rewriter.getArrayAttr(memTypes)));
          {
             mlir::OpBuilder::InsertionGuard guard(rewriter);
@@ -325,48 +337,32 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
             rewriter.setInsertionPoint(insertOp);
             std::vector<mlir::Type> returnTypes{
                tuples::TupleStreamType::get(rewriter.getContext()),
-               tuples::TupleStreamType::get(rewriter.getContext()),
-               tuples::TupleStreamType::get(rewriter.getContext()),
-               tuples::TupleStreamType::get(rewriter.getContext()),
                tuples::TupleStreamType::get(rewriter.getContext())
             };
             for (size_t idx = 0; idx < ht->buckets.size(); idx ++) {
                returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
-               returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
-               returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
-               returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
             }
-            auto generateOp = rewriter.create<subop::GenerateOp>(op->getLoc(), returnTypes, rewriter.getArrayAttr({gDef}));
+            auto generateOp = rewriter.create<subop::GenerateOp>(op->getLoc(), returnTypes, rewriter.getArrayAttr({gDef, gDef2, gDef3, gDef4}));
             {
                auto* generateBlock = new mlir::Block;
                mlir::OpBuilder::InsertionGuard guard2(rewriter);
                rewriter.setInsertionPointToStart(generateBlock);
                generateOp.getRegion().push_back(generateBlock);
 
+               // rewriter.getTupleType
+
                rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                   rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->universalHashA)),
-               });
-               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                   rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->universalHashB)),
-               });
-               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                   rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->tableSize)),
-               });
-               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                   rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->prime)),
                });
 
                for (auto bucket : view->buckets) {
                   rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                      rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.hashA)),
-                  });
-                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                      rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.hashB)),
-                  });
-                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                      rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.m)),
-                  });
-                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
                      rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.offset)),
                   });
                }
@@ -374,9 +370,13 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
             }
             std::vector<mlir::NamedAttribute> newMapping;
             newMapping.push_back(rewriter.getNamedAttr(gMember, gRef));
+            newMapping.push_back(rewriter.getNamedAttr(gMember2, gRef2));
+            newMapping.push_back(rewriter.getNamedAttr(gMember3, gRef3));
+            newMapping.push_back(rewriter.getNamedAttr(gMember4, gRef4));
             rewriter.create<subop::MaterializeOp>(loc, generateOp.getRes(), gbuffer, rewriter.getDictionaryAttr(newMapping));
          }
       };
+
       generateGValues(view);
 
       mlir::Type hashIndexedViewType;

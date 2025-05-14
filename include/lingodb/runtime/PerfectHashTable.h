@@ -94,14 +94,33 @@ public:
       return universalHash(key, universalHashA, universalHashB);
    }
 
-   size_t computeSecondaryHash(uint8_t* keyPtr, Bucket& bucket) {
-      lingodb::runtime::VarLen32 key;
-      std::memcpy(&key, keyPtr, sizeof(key));
-      return universalHash(key, bucket.hashA, bucket.hashB);
+   void* computeBucket(size_t hash) {
+      size_t bucket_idx = hash % buckets.size();
+      auto& bucket = buckets[bucket_idx];
+      return &bucket;
    }
 
+   void* computeEntry(uint8_t* keyPtr, void* bucketPtr) {
+      lingodb::runtime::VarLen32 key;
+      std::memcpy(&key, keyPtr, sizeof(key));
 
-   // TODO
+      Bucket* bucket = (Bucket*) bucketPtr;
+      size_t secondaryHash = universalHash(key, bucket->hashA, bucket->hashB);
+      // printf("!! secondaryHash %lu %u %u\n", secondaryHash, bucket->m, bucket->offset);
+
+      size_t pos = (secondaryHash % bucket->m) + bucket->offset;
+      auto& entry = table[pos];
+      return &entry;
+   }
+
+   // size_t computeSecondaryHash(uint8_t* keyPtr, Bucket& bucket) {
+   //    lingodb::runtime::VarLen32 key;
+   //    std::memcpy(&key, keyPtr, sizeof(key));
+   //    return universalHash(key, bucket.hashA, bucket.hashB);
+   // }
+
+
+   // // TODO
    // void* containHash(size_t hash, size_t secondaryHash) {
    //    size_t bucket_idx = hash % table.size();
    //    const auto& bucket = buckets[bucket_idx];
@@ -110,12 +129,12 @@ public:
    //    auto& entry = table[pos];
    //    return &entry;
    // }
-   void* containHash(size_t hash) {
-      size_t bucket_idx = hash % table.size();
-      const auto& bucket = buckets[bucket_idx];
-      auto& entry = table[bucket.offset];
-      return &entry;
-   }
+   // void* containHash(size_t hash) {
+   //    size_t bucket_idx = hash % table.size();
+   //    const auto& bucket = buckets[bucket_idx];
+   //    auto& entry = table[bucket.offset];
+   //    return &entry;
+   // }
 
    // // 查找键
    // bool contains(const std::string& key) const {
