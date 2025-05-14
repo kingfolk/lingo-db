@@ -4,189 +4,139 @@
 #include "lingodb/runtime/helpers.h"
 #include "lingodb/runtime/StringRuntime.h"
 #include <cstring>
+#include <random>
 
 namespace lingodb::runtime {
 class GrowingBuffer;
-struct HashParams {
-   uint32_t a;
-   uint32_t b;
-};
+class RandomNumberGenerator {
+public:
+   RandomNumberGenerator(uint32_t min, uint32_t max) : dist_(min, max) {
+      std::random_device rd;
+      engine_.seed(rd());
+   }
 
-// TODO RENAME
-struct LKEntry {
-   bool empty;
-   uint64_t hashvalue;
-   VarLen32 key;
+   uint32_t generate() {
+      return dist_(engine_);
+   }
+
+private:
+   std::mt19937 engine_;
+   std::uniform_int_distribution<uint32_t> dist_;
 };
 
 class PerfectHashView {
-   // Hash function parameters
-   // HashParams auxHashParams[2];  // Parameters for auxiliary hash functions
-   // int8_t* g;                  // Displacement values
-   // lingodb::runtime::VarLen32** lookupTable;
-   // size_t tableSize;                       // Size of the hash table (number of keys)
-   // size_t r;                               // Range for intermediate hash values
+   struct Bucket {
+      std::vector<std::string> keys;
+      uint32_t hashA = 0;
+      uint32_t hashB = 0;
+      uint32_t m = 0;
+      uint32_t offset = 0;
+   };
+
+   struct Entry {
+      uint64_t hash;
+      uint64_t secondaryHash;
+      VarLen32 key;
+   };
+
 public:
-   LKEntry* lookupTable;
-   std::vector<size_t> g;                  // Displacement values
-   HashParams auxHashParams[2];  // Parameters for auxiliary hash functions
-   // Size of the hash table (number of keys). max 256
-   uint8_t tableSize;
-   // Size of displacement table. max 65536
-   uint16_t r;
+   std::vector<Bucket> buckets;
+   std::vector<Entry> table;
+   uint32_t universalHashA = 0;
+   uint32_t universalHashB = 0;
+   uint32_t tableSize = 0;
+   uint32_t prime = 0;
+
+   RandomNumberGenerator rndG = RandomNumberGenerator(1, 0x7FFFFFFE);
+
+   uint32_t random(uint32_t max) {
+      return rndG.generate() % max;
+   }
+
+   size_t universalHash(const std::string& key, size_t a, size_t b) const;
+
+   // TODO DELETE USE AS LAMBDA
+   bool hasCollision(const std::vector<std::string>& keys, size_t a, size_t b, size_t m) const;
+
+   // TODO DELETE USE AS LAMBDA
+   void findHashParams(Bucket& bucket, size_t m);
+
+   // Calculate next prime
+   size_t nextPrime(size_t n) const;
+
+   void constructTable();
+
+   static lingodb::runtime::PerfectHashView* build(FlexibleBuffer* keyValues, FlexibleBuffer* bucketValues);
+   static lingodb::runtime::PerfectHashView* construct(const std::vector<std::string>& keys);
+   lingodb::runtime::PerfectHashView* constructUp(const std::vector<std::string>& keys);
+
+   // IR LOGIC
+   // keyHash1 = universalHash(key, a, b)
+   // bukcetPos = keyHash1 % buckets.size()
+   // bucket = buckets[bukcetPos]
+   // if bucket.m == 1:
+   //   if bucket has key and table[0].hash1 == keyHash1:
+   //    if table[0].key == key:
+   //      materialize true
+   // else:
+   //   keyHash2 = universalHash(key, bucket.a, bucket.b)
+   //   tablePos = keyHash2 % bucket.m + bucket.offset
+   //   slot = table[tablePos]
+   //   if slot.hash1 == keyHash1 && slot.hash2 == keyHash2
+   //    if slot.key == key
+   //      materialize true
    
-   std::vector<std::optional<std::string>> lookupTableRaw;
-
-   // Constructor
-   PerfectHashView(const std::vector<std::string>& keySet) {
-      tableSize = keySet.size() * 2;
-      if (tableSize > 0) {
-         lookupTable = (LKEntry*) malloc(sizeof(LKEntry) * tableSize);
-         lookupTableRaw.resize(tableSize);
-      }
-   }
-
-   // Build the perfect hash function
-   static PerfectHashView* buildPerfectHash(const std::vector<std::string>& keySet);
-
-   static PerfectHashView* build(FlexibleBuffer* lkbuffer, FlexibleBuffer* gvalues);
-
-   // Universal hash function: h(x) = ((a*x + b) mod p) mod r
-   size_t universalHash(const char* keyPtr, size_t keyLen, const HashParams& params, bool trim) const;
-
-   size_t fastHash(const char* keyPtr, size_t keyLen, const HashParams& params1, const HashParams& params2) const {
-      size_t hash1 = 0, hash2 = 0;
-      const uint32_t prime = 0x7FFFFFFF; // 2^31 - 1
-
-      // // 4 bytes as a unit to compute hash
-      int i = 0;
-      for (; i < keyLen - 4; i += 4) {
-         uint32_t c;
-         std::memcpy(&c, keyPtr+i, sizeof(uint32_t));
-         hash1 = (hash1 * params1.a + c) & prime;
-         hash2 = (hash2 * params2.a + c) & prime;
-      }
-
-      // deal with not mutiply of 4 part
-      size_t restLen = keyLen - i;
-      if (restLen == 3) {
-         uint32_t c;
-         std::memcpy(&c, keyPtr+i, sizeof(uint32_t));
-         c &= 0x00FFFFFF;
-         hash1 = (hash1 * params1.a + c) & prime;
-         hash2 = (hash2 * params2.a + c) & prime;
-      } else if (restLen == 2) {
-         uint16_t c;
-         std::memcpy(&c, keyPtr+i, sizeof(uint16_t));
-         hash1 = (hash1 * params1.a + c) & prime;
-         hash2 = (hash2 * params2.a + c) & prime;
-         restLen -= 2;
-      } else if (restLen == 1) {
-         uint8_t c = static_cast<uint8_t>(*(keyPtr+restLen));
-         hash1 = (hash1 * params1.a + c) & prime;
-         hash2 = (hash2 * params2.a + c) & prime;
-      }
-      hash1 = (hash1 * params1.b) & prime;
-      hash2 = (hash2 * params2.b) & prime;
-
-      return hash1 + g[hash2 % this->r];
-   }
-
+   
    size_t computeHash(uint8_t* keyPtr) {
-      // printf("~~~ computeHash %p\n", keyPtr);
-      // return 0;
-      if (keyPtr == nullptr) {
-         printf("~~~!! computeHash %p\n", keyPtr);
-      }
-      // printf("~~~ computeHash %s %lu\n", key.str().c_str(), h);
-
-      // lingodb::runtime::VarLen32 key;
-      // std::memcpy(&key, keyPtr, sizeof(key));
-      lingodb::runtime::VarLen32& key = *(reinterpret_cast<lingodb::runtime::VarLen32*>(keyPtr));
-      size_t h1 = universalHash(key.data(), key.getLen(), auxHashParams[0], false);
-      size_t h2 = universalHash(key.data(), key.getLen(), auxHashParams[1], true);
-
-      return h1 + g[h2];
+      lingodb::runtime::VarLen32 key;
+      std::memcpy(&key, keyPtr, sizeof(key));
+      // lingodb::runtime::VarLen32& key = *(reinterpret_cast<lingodb::runtime::VarLen32*>(keyPtr));
+      return universalHash(key, universalHashA, universalHashB);
    }
 
-   // Check if a key exists in the original key set
-   void* containHash(size_t h) {
-      size_t idx = h % tableSize;
+   size_t computeSecondaryHash(uint8_t* keyPtr, Bucket& bucket) {
+      lingodb::runtime::VarLen32 key;
+      std::memcpy(&key, keyPtr, sizeof(key));
+      return universalHash(key, bucket.hashA, bucket.hashB);
+   }
+
+
+   // TODO
+   // void* containHash(size_t hash, size_t secondaryHash) {
+   //    size_t bucket_idx = hash % table.size();
+   //    const auto& bucket = buckets[bucket_idx];
       
-      // 直接检查查找表中的值是否匹配
-      // TODO DELETE contains. LOOKUP logics in MLIR
-      return &lookupTable[idx];
+   //    size_t pos = (secondaryHash % bucket.m) + bucket.offset;
+   //    auto& entry = table[pos];
+   //    return &entry;
+   // }
+   void* containHash(size_t hash) {
+      size_t bucket_idx = hash % table.size();
+      const auto& bucket = buckets[bucket_idx];
+      auto& entry = table[bucket.offset];
+      return &entry;
    }
 
-   void* dryRun() {
-      static lingodb::runtime::VarLen32 dryRunkey;
-      if (dryRunkey.getLen() == 0) {
-         dryRunkey = lingodb::runtime::VarLen32::fromString("Clerk#000000536");
-      }
-      // size_t h1 = universalHash(dryRunkey.data(), dryRunkey.getLen(), auxHashParams[0], false);
-      // size_t h2 = universalHash(dryRunkey.data(), dryRunkey.getLen(), auxHashParams[1], true);
+   // // 查找键
+   // bool contains(const std::string& key) const {
+   //    if (table.empty()) return false;
 
-      // size_t h = h1 + g[h2];
-      size_t h = fastHash(dryRunkey.data(), dryRunkey.getLen(), auxHashParams[0], auxHashParams[1]);
+   //    // 第一级哈希确定桶
+   //    size_t bucket_idx = universalHash(key, universalHashA, universalHashB) % buckets.size();
+   //    const auto& bucket = buckets[bucket_idx];
 
-      static LKEntry* first;
-      static LKEntry* second;
-      if (!first) {
-         for (int i = 0; i < tableSize; i ++) {
-            if (!lookupTable[i].empty) {
-               if (!first) first = &lookupTable[i];
-               else {
-                  second = &lookupTable[i];
-                  printf("<<<< dryRun %d %lu %s\n", i, second->hashvalue, second->key.str().c_str());
-                  break;
-               }
-            }
-         }
-      }
+   //    if (bucket.keys.empty()) return false;
 
-      if (h != std::numeric_limits<size_t>::max()) {
-         return first;
-      }
-      return second;
-      // return first;
-   }
+   //    // 第二级哈希查找精确位置
+   //    size_t pos =    secondaryHash(key, bucket);
+   //    if (pos >= tableSize) return false;
 
-   size_t dryRunHash() {
-      static LKEntry* first;
-      if (!first) {
-         for (int i = 0; i < tableSize; i ++) {
-            if (!lookupTable[i].empty) {
-               first = &lookupTable[i];
-               printf("<<<< dryRunHash %d %lu %s\n", i, first->hashvalue, first->key.str().c_str());
-               break;
-            }
-         }
-      }
-      return first->hashvalue;
-   }
-
-   // size_t computeHash(lingodb::runtime::VarLen32 key) {
-   //    // printf("~~~ computeHash %p\n", keyPtr);
-   //    // return 0;
-   //    size_t h1 = universalHash(key, auxHashParams[0], false);
-   //    size_t h2 = universalHash(key, auxHashParams[1], true);
-
-   //    return (h1 + g[h2]);
+   //    return table[pos] == bucket_idx;
    // }
 
-   // Get the number of keys in the hash table
    size_t size() const {
       return tableSize;
    }
-
-   // TODO
-   // // Display statistics about the hash function
-   // void printStats() const {
-   //    std::cout << "FCH Perfect Hash Statistics:" << std::endl;
-   //    std::cout << "Number of keys: " << tableSize << std::endl;
-   //    std::cout << "Displacement table size: " << g.size() << std::endl;
-   //    std::cout << "Bits per key: " << (float)(g.size() * 8) / tableSize << std::endl;
-   // }
 };
 } // end namespace lingodb::runtime
 #endif // LINGODB_RUNTIME_PERFECTHASHTABLE_H

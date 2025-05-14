@@ -63,19 +63,19 @@ class MultiMapAsHashIndexedView : public mlir::RewritePattern {
             otherUses.push_back(u);
          }
       }
-      if (auto generateOp = mlir::dyn_cast_or_null<subop::GenerateOp>(insertOp.getStream().getDefiningOp())) {
-         bool constEmit = false;
-         generateOp.getRegion().walk([&](subop::GenerateEmitOp emitOp) {
-            auto v = emitOp.getValues()[0];
-            auto c = mlir::dyn_cast_or_null<db::ConstantOp>(v.getDefiningOp());
-            if (c) {
-               constEmit = true;
-            }
-         });
-         if (constEmit) {
-            return mlir::failure();
-         }
-      }
+      // if (auto generateOp = mlir::dyn_cast_or_null<subop::GenerateOp>(insertOp.getStream().getDefiningOp())) {
+      //    bool constEmit = false;
+      //    generateOp.getRegion().walk([&](subop::GenerateEmitOp emitOp) {
+      //       auto v = emitOp.getValues()[0];
+      //       auto c = mlir::dyn_cast_or_null<db::ConstantOp>(v.getDefiningOp());
+      //       if (c) {
+      //          constEmit = true;
+      //       }
+      //    });
+      //    if (constEmit) {
+      //       return mlir::failure();
+      //    }
+      // }
 
       auto hashMember = memberManager.getUniqueMember("hash");
       auto linkMember = memberManager.getUniqueMember("link");
@@ -209,6 +209,8 @@ class MultiMapAsHashIndexedView : public mlir::RewritePattern {
       rewriter.eraseOp(insertOp);
       transformer.updateValue(state, buffer.getType());
       rewriter.replaceOp(createOp, buffer);
+      // printf("--- rewriter.getBlock().dump() ---\n");
+      // rewriter.getBlock()->dump();
       return mlir::success();
    }
 };
@@ -268,7 +270,7 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
       if (!insertConst) {
          return mlir::failure();
       }
-      auto view = lingodb::runtime::PerfectHashView::buildPerfectHash(constHashRaws);
+      auto view = lingodb::runtime::PerfectHashView::construct(constHashRaws);
       auto hashMember = memberManager.getUniqueMember("hash");
       // auto linkMember = memberManager.getUniqueMember("link");
       auto [hashDef, hashRef] = createColumn(rewriter.getIndexType(), "hj", "hash");
@@ -280,6 +282,7 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
          mlir::OpBuilder::InsertionGuard guard(rewriter);
          rewriter.setInsertionPoint(createOp);
       }
+      // TODO RENAME
       mlir::Value lkbuffer;
       auto lkMember = memberManager.getUniqueMember("lk");
       auto generateLKValues = [&]() {
@@ -302,9 +305,10 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
       };
       generateLKValues();
 
+      // TODO RENAME
       mlir::Value gbuffer;
       auto gMember = memberManager.getUniqueMember("g");
-      auto generateGValues = [&](std::vector<size_t> g, lingodb::runtime::HashParams auxHashParams[2]) {
+      auto generateGValues = [&](lingodb::runtime::PerfectHashView* ht) {
          auto [gDef, gRef] = createColumn(rewriter.getI64Type(), "constg", "g");
 
          std::vector<mlir::Attribute> memNames{rewriter.getStringAttr(gMember)};
@@ -326,8 +330,10 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
                tuples::TupleStreamType::get(rewriter.getContext()),
                tuples::TupleStreamType::get(rewriter.getContext())
             };
-            for (size_t idx = 0; idx < g.size(); idx ++) {
-               if (g[idx] == 0) continue;
+            for (size_t idx = 0; idx < ht->buckets.size(); idx ++) {
+               returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
+               returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
+               returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
                returnTypes.push_back(tuples::TupleStreamType::get(rewriter.getContext()));
             }
             auto generateOp = rewriter.create<subop::GenerateOp>(op->getLoc(), returnTypes, rewriter.getArrayAttr({gDef}));
@@ -337,28 +343,32 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
                rewriter.setInsertionPointToStart(generateBlock);
                generateOp.getRegion().push_back(generateBlock);
 
-               auto entry0 = auxHashParams[0].a;
-               mlir::Value entryVal0 = rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI64Type(), rewriter.getI64IntegerAttr(entry0));
-               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{entryVal0});
+               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                  rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->universalHashA)),
+               });
+               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                  rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->universalHashB)),
+               });
+               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                  rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->tableSize)),
+               });
+               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                  rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(view->prime)),
+               });
 
-               auto entry1 = auxHashParams[0].b;
-               mlir::Value entryVal1 = rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI64Type(), rewriter.getI64IntegerAttr(entry1));
-               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{entryVal1});
-
-               auto entry2 = auxHashParams[1].a;
-               mlir::Value entryVal2 = rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI64Type(), rewriter.getI64IntegerAttr(entry2));
-               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{entryVal2});
-
-               auto entry3 = auxHashParams[1].b;
-               mlir::Value entryVal3 = rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI64Type(), rewriter.getI64IntegerAttr(entry3));
-               rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{entryVal3});
-
-               for (size_t idx = 0; idx < g.size(); idx ++) {
-                  auto displ = g[idx];
-                  if (displ == 0) continue;
-                  displ = displ + (idx << 32);
-                  mlir::Value displVal = rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI64Type(), rewriter.getI64IntegerAttr(displ));
-                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{displVal});
+               for (auto bucket : view->buckets) {
+                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                     rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.hashA)),
+                  });
+                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                     rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.hashB)),
+                  });
+                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                     rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.m)),
+                  });
+                  rewriter.create<subop::GenerateEmitOp>(op->getLoc(), std::vector<mlir::Value>{
+                     rewriter.create<db::ConstantOp>(op->getLoc(), rewriter.getI32Type(), rewriter.getUI32IntegerAttr(bucket.offset)),
+                  });
                }
                rewriter.create<tuples::ReturnOp>(op->getLoc());
             }
@@ -367,7 +377,7 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
             rewriter.create<subop::MaterializeOp>(loc, generateOp.getRes(), gbuffer, rewriter.getDictionaryAttr(newMapping));
          }
       };
-      generateGValues(view->g, view->auxHashParams);
+      generateGValues(view);
 
       mlir::Type hashIndexedViewType;
       // TODO RENAME
@@ -457,8 +467,8 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
       // TODO
       // transformer.updateValue(state, buffer.getType());
       // rewriter.replaceOp(createOp, buffer);
-      printf("--- rewriter.getBlock().dump() ---\n");
-      rewriter.getBlock()->dump();
+      // printf("--- rewriter.getBlock().dump() ---\n");
+      // rewriter.getBlock()->dump();
       return mlir::success();
    }
 };
@@ -557,7 +567,7 @@ class SpecializeSubOpPass : public mlir::PassWrapper<SpecializeSubOpPass, mlir::
 
       mlir::RewritePatternSet patterns(&getContext());
       if (withOptimizations) {
-         patterns.insert<MultiMapAsHashIndexedView>(&getContext(), columnUsageAnalysis);
+         // patterns.insert<MultiMapAsHashIndexedView>(&getContext(), columnUsageAnalysis);
          patterns.insert<MultiMapAsPerfectHashView>(&getContext(), columnUsageAnalysis);
       }
       patterns.insert<MapAsHashMap>(&getContext(), columnUsageAnalysis);
