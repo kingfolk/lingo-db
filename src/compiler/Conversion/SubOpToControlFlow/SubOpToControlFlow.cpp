@@ -3596,8 +3596,26 @@ class CreatePerfectHashViewLowering : public SubOpConversionPattern<subop::Creat
       // auto linkIsFirst = mlir::cast<mlir::StringAttr>(bufferType.getMembers().getNames()[0]).str() == createOp.getLinkMember();
       // auto hashIsSecond = mlir::cast<mlir::StringAttr>(bufferType.getMembers().getNames()[1]).str() == createOp.getHashMember();
       // if (!linkIsFirst || !hashIsSecond) return failure();
-      auto htView = rt::PerfectHashView::build(rewriter, createOp->getLoc())({adaptor.getLk(), adaptor.getG()})[0];
+      mlir::Value paramValues = rewriter.create<util::CreateConstVarLen>(createOp->getLoc(), util::VarLen32Type::get(rewriter.getContext()), createOp.getGAttr());
+      auto htView = rt::PerfectHashView::build(rewriter, createOp->getLoc())({adaptor.getLk(), paramValues})[0];
       rewriter.replaceOp(createOp, htView);
+
+      // std::string paramEncoding;
+      // // TODO 20 is tmp value
+      // paramEncoding.resize(4*4 + 80*4*4);
+      // uint8_t* ptr = (uint8_t*)paramEncoding.data();
+      // auto writeUint32ToPtr = [&](uint32_t v, uint8_t* start) {
+      //    std::memcpy(start, &v, sizeof(v));
+      //    return start + 4;
+      // };
+      // for (auto member : createOp.getG()) {
+      //    auto v = mlir::cast<mlir::IntegerAttr>(member);
+      //    uint32_t u = v.getUInt();
+      //    ptr = writeUint32ToPtr(u, ptr);
+      // }
+      // mlir::Value paramValues = rewriter.create<util::CreateConstVarLen>(createOp->getLoc(), util::VarLen32Type::get(rewriter.getContext()), paramEncoding);
+      // auto htView = rt::PerfectHashView::build(rewriter, createOp->getLoc())({adaptor.getLk(), paramValues})[0];
+      // rewriter.replaceOp(createOp, htView);
       return success();
    }
 };

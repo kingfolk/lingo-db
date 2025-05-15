@@ -59,14 +59,15 @@ public:
    bool hasCollision(const std::vector<std::string>& keys, size_t a, size_t b, size_t m) const;
 
    // TODO DELETE USE AS LAMBDA
-   void findHashParams(Bucket& bucket, size_t m);
+   void findHashParams(Bucket& bucket, size_t& m);
 
    // Calculate next prime
    size_t nextPrime(size_t n) const;
 
    void constructTable();
 
-   static lingodb::runtime::PerfectHashView* build(FlexibleBuffer* keyValues, FlexibleBuffer* bucketValues);
+   // static lingodb::runtime::PerfectHashView* build(FlexibleBuffer* keyValues, FlexibleBuffer* paramValues);
+   static lingodb::runtime::PerfectHashView* build(FlexibleBuffer* keyValues, VarLen32 paramValues);
    static lingodb::runtime::PerfectHashView* construct(const std::vector<std::string>& keys);
    lingodb::runtime::PerfectHashView* constructUp(const std::vector<std::string>& keys);
 

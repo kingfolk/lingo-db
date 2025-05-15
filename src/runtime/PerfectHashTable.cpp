@@ -70,7 +70,6 @@ size_t lingodb::runtime::PerfectHashView::universalHash(const std::string& key, 
       hash = (hash * a + c) & prime;
    }
 
-   // printf("*** key %s %u\n", key.c_str(), (hash + b) % prime + 1);
    return (hash + b) % prime + 1;
 }
 
@@ -79,6 +78,7 @@ bool lingodb::runtime::PerfectHashView::hasCollision(const std::vector<std::stri
    std::vector<bool> occupied(m, false);
    for (const auto& key : keys) {
       size_t h = universalHash(key, a, b) % m;
+      // printf("*** key %s %lu %lu %lu %lu %lu\n", key.c_str(), universalHash(key, a, b), h, universalHashA, universalHashB, m);
       if (occupied[h]) {
       return true;
       }
@@ -87,15 +87,18 @@ bool lingodb::runtime::PerfectHashView::hasCollision(const std::vector<std::stri
    return false;
 }
 
-void lingodb::runtime::PerfectHashView::findHashParams(Bucket& bucket, size_t m) {
-   const size_t max_attempts = 1000;
-   for (size_t i = 0; i < max_attempts; ++i) {
-      bucket.hashA = random(prime - 1) + 1;
-      bucket.hashB = random(prime);
+void lingodb::runtime::PerfectHashView::findHashParams(Bucket& bucket, size_t& m) {
+   const size_t max_attempts = 300;
+   for (size_t k = 0; k < max_attempts; ++k) {
+      for (size_t i = 0; i < 3; ++i) {
+         bucket.hashA = random(prime - 1) + 1;
+         bucket.hashB = random(prime);
 
-      if (!hasCollision(bucket.keys, bucket.hashA, bucket.hashB, m)) {
-      return;
+         if (!hasCollision(bucket.keys, bucket.hashA, bucket.hashB, m)) {
+            return;
+         }
       }
+      m++;
    }
    throw std::runtime_error("Failed to find perfect hash function for bucket");
 }
@@ -115,37 +118,33 @@ size_t lingodb::runtime::PerfectHashView::nextPrime(size_t n) const {
    }
 }
 
-lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(FlexibleBuffer* keyValues, FlexibleBuffer* paramValues) {
+lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(FlexibleBuffer* keyValues, VarLen32 paramValues) {
    lingodb::runtime::PerfectHashView* ph = new lingodb::runtime::PerfectHashView();
    auto* executionContext = runtime::getCurrentExecutionContext();
    executionContext->registerState({ph, [](void* ptr) { delete reinterpret_cast<lingodb::runtime::PerfectHashView*>(ptr); }});
 
    size_t vIdx = 0;
-   size_t paramLen = paramValues->getLen();
-   size_t bucketSize = paramLen -1;
+   size_t paramLen = paramValues.getLen();
+   size_t bucketSize = paramLen / 16 - 1;
    ph->buckets.reserve(bucketSize);
    Bucket b;
    printf("~~~ PerfectHashView::build %lu\n", bucketSize);
-   paramValues->iterate([&](uint8_t* ptr) {
-      if (vIdx == 0) {
-         uint32_t* v = reinterpret_cast<uint32_t*>(ptr);
-         ph->universalHashA = v[0];
-         ph->universalHashB = v[1];
-         ph->tableSize = v[2];
-         ph->prime = v[3];
-      } else {
-         uint32_t* v = reinterpret_cast<uint32_t*>(ptr);
-         b.hashA = v[0];
-         b.hashB = v[1];
-         b.m = v[2];
-         b.offset = v[3];
-         ph->buckets.push_back(b);
-
-         // printf("~~~ bucket %u %u %u %u\n", b.hashA, b.hashA, b.m, b.offset);
-      }
-
-      vIdx++;
-   });
+   auto readUint32FromPtr = [&](uint8_t* ptr, uint32_t& v) {
+      std::memcpy(&v, ptr, sizeof(v));
+      return ptr + 4;
+   };
+   uint8_t* ptr = (uint8_t*)paramValues.data();
+   ptr = readUint32FromPtr(ptr, ph->universalHashA);
+   ptr = readUint32FromPtr(ptr, ph->universalHashB);
+   ptr = readUint32FromPtr(ptr, ph->tableSize);
+   ptr = readUint32FromPtr(ptr, ph->prime);
+   for (int i = 0; i < bucketSize; i ++) {
+      ptr = readUint32FromPtr(ptr, b.hashA);
+      ptr = readUint32FromPtr(ptr, b.hashB);
+      ptr = readUint32FromPtr(ptr, b.m);
+      ptr = readUint32FromPtr(ptr, b.offset);
+      ph->buckets.push_back(b);
+   }
 
    printf("~~~ prime %lu, a %lu, b %lu, tableSize %lu\n", ph->prime, ph->universalHashA, ph->universalHashB, ph->tableSize);
 
@@ -159,6 +158,51 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(Flex
    ph->constructTable();
    return ph;
 }
+
+// lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(FlexibleBuffer* keyValues, FlexibleBuffer* paramValues) {
+//    lingodb::runtime::PerfectHashView* ph = new lingodb::runtime::PerfectHashView();
+//    auto* executionContext = runtime::getCurrentExecutionContext();
+//    executionContext->registerState({ph, [](void* ptr) { delete reinterpret_cast<lingodb::runtime::PerfectHashView*>(ptr); }});
+
+//    size_t vIdx = 0;
+//    size_t paramLen = paramValues->getLen();
+//    size_t bucketSize = paramLen - 1;
+//    ph->buckets.reserve(bucketSize);
+//    Bucket b;
+//    printf("~~~ PerfectHashView::build %lu\n", bucketSize);
+//    paramValues->iterate([&](uint8_t* ptr) {
+//       if (vIdx == 0) {
+//          uint32_t* v = reinterpret_cast<uint32_t*>(ptr);
+//          ph->universalHashA = v[0];
+//          ph->universalHashB = v[1];
+//          ph->tableSize = v[2];
+//          ph->prime = v[3];
+//       } else {
+//          uint32_t* v = reinterpret_cast<uint32_t*>(ptr);
+//          b.hashA = v[0];
+//          b.hashB = v[1];
+//          b.m = v[2];
+//          b.offset = v[3];
+//          ph->buckets.push_back(b);
+
+//          // printf("~~~ bucket %u %u %u %u\n", b.hashA, b.hashA, b.m, b.offset);
+//       }
+
+//       vIdx++;
+//    });
+
+//    printf("~~~ prime %lu, a %lu, b %lu, tableSize %lu\n", ph->prime, ph->universalHashA, ph->universalHashB, ph->tableSize);
+
+//    keyValues->iterate([&](uint8_t* ptr) {
+//       VarLen32 v;
+//       std::memcpy(&v, ptr, sizeof(v));
+//       std::string key = v.str();
+//       size_t bucket_idx = ph->universalHash(key, ph->universalHashA, ph->universalHashB) % bucketSize;
+//       ph->buckets[bucket_idx].keys.push_back(key);
+//    });
+//    ph->constructTable();
+//    return ph;
+// }
 
 lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::construct(const std::vector<std::string>& keys) {
    lingodb::runtime::PerfectHashView* ph = new lingodb::runtime::PerfectHashView();
@@ -196,38 +240,35 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::constructU
    printf("--- hash calc: %lf\n", p1);
 
    // 3. 计算第二级哈希表的大小
-   size_t total_slots = 0;
-   for (const auto& bucket : buckets) {
-      size_t m = nextPrime(bucket.keys.size() * bucket.keys.size());
-      if (m == 0) m = 1; // 空桶至少一个槽位
-      total_slots += m;
-   }
-   tableSize = nextPrime(total_slots);
-
-   printf("<<< keys.size() %lu, prime %lu, a %lu, b %lu, tableSize %lu\n", keys.size(), prime, universalHashA, universalHashB, tableSize);
-
-   auto sizeEnd = std::chrono::high_resolution_clock::now();
-   auto p2 = std::chrono::duration_cast<std::chrono::microseconds>(sizeEnd - hashEnd).count() / 1000.0;
-   printf("--- table size calc: %lf\n", p2);
+   // size_t total_slots = 0;
+   // for (const auto& bucket : buckets) {
+   //    size_t m = bucket.keys.size() * bucket.keys.size();
+   //    if (m == 0) m = 1; // 空桶至少一个槽位
+   //    total_slots += m;
+   // }
+   // tableSize = nextPrime(total_slots);
 
    // 4. 为每个桶找到无冲突的哈希参数
    size_t offset = 0;
    for (auto& bucket : buckets) {
-      size_t m = nextPrime(bucket.keys.size() * bucket.keys.size());
+      size_t m = bucket.keys.size() * bucket.keys.size();
       if (m == 0) m = 1; // 空桶至少一个槽位
 
-      bucket.m = m;
       bucket.offset = offset;
       if (!bucket.keys.empty()) {
          findHashParams(bucket, m);
       }
+      bucket.m = m;
       offset += m;
 
       // printf("<<< bucket.keys.size() %lu %u %u %u %u\n", bucket.keys.size(), bucket.hashA, bucket.hashA, bucket.m, bucket.offset);
    }
+   tableSize = offset;
+
+   printf("<<< keys.size() %lu, prime %lu, a %lu, b %lu, tableSize %lu\n", keys.size(), prime, universalHashA, universalHashB, tableSize);
 
    auto collideEnd = std::chrono::high_resolution_clock::now();
-   auto p3 = std::chrono::duration_cast<std::chrono::microseconds>(collideEnd - sizeEnd).count() / 1000.0;
+   auto p3 = std::chrono::duration_cast<std::chrono::microseconds>(collideEnd - hashEnd).count() / 1000.0;
    printf("--- collide calc: %lf\n", p3);
 
    constructTable();
