@@ -40,12 +40,15 @@ class PerfectHashView {
    };
 
 public:
-   std::vector<Bucket> buckets;
-   std::vector<Entry> table;
+   Bucket* bucketsData;
+   Entry* tableData;
    uint32_t universalHashA = 0;
    uint32_t universalHashB = 0;
    uint32_t tableSize = 0;
    uint32_t prime = 0;
+   uint32_t bucketSize = 0;
+   std::vector<Bucket> buckets;
+   std::vector<Entry> table;
 
    RandomNumberGenerator rndG = RandomNumberGenerator(1, 0x7FFFFFFE);
 
@@ -66,7 +69,6 @@ public:
 
    void constructTable();
 
-   // static lingodb::runtime::PerfectHashView* build(FlexibleBuffer* keyValues, FlexibleBuffer* paramValues);
    static lingodb::runtime::PerfectHashView* build(FlexibleBuffer* keyValues, VarLen32 paramValues);
    static lingodb::runtime::PerfectHashView* construct(const std::vector<std::string>& keys);
    lingodb::runtime::PerfectHashView* constructUp(const std::vector<std::string>& keys);

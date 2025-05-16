@@ -894,6 +894,28 @@ class SortCompareLowering : public OpConversionPattern<db::SortCompare> {
       return success();
    }
 };
+class HashPerfectLowering : public ConversionPattern {
+public:
+   explicit HashPerfectLowering(TypeConverter& typeConverter, MLIRContext* context)
+      : ConversionPattern(typeConverter, db::HashPerfect::getOperationName(), 1, context) {}
+   LogicalResult matchAndRewrite(Operation* op, ArrayRef<Value> operands, ConversionPatternRewriter& rewriter) const override {
+      printf("!!!! HashPerfectLowering\n");
+      db::HashPerfectAdaptor hashAdaptor(operands);
+      auto hashOp = mlir::cast<db::HashPerfect>(op);
+
+      auto val = hashAdaptor.getVal();
+      auto a = hashAdaptor.getA();
+      auto b = hashAdaptor.getB();
+      val.dump();
+      a.dump();
+      b.dump();
+
+      Value result = rewriter.create<mlir::arith::ConstantIndexOp>(op->getLoc(), 1);
+
+      rewriter.replaceOp(op, result);
+      return success();
+   }
+};
 class HashLowering : public ConversionPattern {
    Value combineHashes(OpBuilder& builder, Location loc, Value hash1, Value totalHash) const {
       if (!totalHash) {
@@ -1161,6 +1183,7 @@ void DBToStdLoweringPass::runOnOperation() {
    patterns.insert<CastNoneOpLowering>(typeConverter, ctxt);
 
    patterns.insert<HashLowering>(typeConverter, ctxt);
+   patterns.insert<HashPerfectLowering>(typeConverter, ctxt);
 
    if (failed(applyFullConversion(module, target, std::move(patterns))))
       signalPassFailure();

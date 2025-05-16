@@ -216,6 +216,14 @@ def DB_Hash : DB_Op<"hash", [Pure]> {
     let assemblyFormat = "$val `:` type($val) attr-dict";
 }
 
+def DB_HashPerfect : DB_Op<"hash_perfect", [Pure]> {
+    let summary = "Compute perfect hash";
+
+    let arguments = (ins AnyType: $val, I32: $a, I32: $b);
+    let results = (outs  Index : $hash);
+    let assemblyFormat = "$val `:` type($val) $a $b attr-dict";
+}
+
 class DB_BinaryOp<string mnemonic, list<Trait> traits = []> :
         Op<DB_Dialect, mnemonic,
             !listconcat(traits, [Pure,DeclareOpInterfaceMethods<InferTypeOpInterface>,DB_NeedsNullWrap])>,Arguments<(ins NullableDBType:$left, NullableDBType:$right)> {

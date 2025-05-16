@@ -127,6 +127,7 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(Flex
    size_t paramLen = paramValues.getLen();
    size_t bucketSize = paramLen / 16 - 1;
    ph->buckets.reserve(bucketSize);
+   ph->bucketSize = bucketSize;
    Bucket b;
    printf("~~~ PerfectHashView::build %lu\n", bucketSize);
    auto readUint32FromPtr = [&](uint8_t* ptr, uint32_t& v) {
@@ -156,53 +157,11 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(Flex
       ph->buckets[bucket_idx].keys.push_back(key);
    });
    ph->constructTable();
+
+   ph->bucketsData = ph->buckets.data();
+   ph->tableData = ph->table.data();
    return ph;
 }
-
-// lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(FlexibleBuffer* keyValues, FlexibleBuffer* paramValues) {
-//    lingodb::runtime::PerfectHashView* ph = new lingodb::runtime::PerfectHashView();
-//    auto* executionContext = runtime::getCurrentExecutionContext();
-//    executionContext->registerState({ph, [](void* ptr) { delete reinterpret_cast<lingodb::runtime::PerfectHashView*>(ptr); }});
-
-//    size_t vIdx = 0;
-//    size_t paramLen = paramValues->getLen();
-//    size_t bucketSize = paramLen - 1;
-//    ph->buckets.reserve(bucketSize);
-//    Bucket b;
-//    printf("~~~ PerfectHashView::build %lu\n", bucketSize);
-//    paramValues->iterate([&](uint8_t* ptr) {
-//       if (vIdx == 0) {
-//          uint32_t* v = reinterpret_cast<uint32_t*>(ptr);
-//          ph->universalHashA = v[0];
-//          ph->universalHashB = v[1];
-//          ph->tableSize = v[2];
-//          ph->prime = v[3];
-//       } else {
-//          uint32_t* v = reinterpret_cast<uint32_t*>(ptr);
-//          b.hashA = v[0];
-//          b.hashB = v[1];
-//          b.m = v[2];
-//          b.offset = v[3];
-//          ph->buckets.push_back(b);
-
-//          // printf("~~~ bucket %u %u %u %u\n", b.hashA, b.hashA, b.m, b.offset);
-//       }
-
-//       vIdx++;
-//    });
-
-//    printf("~~~ prime %lu, a %lu, b %lu, tableSize %lu\n", ph->prime, ph->universalHashA, ph->universalHashB, ph->tableSize);
-
-//    keyValues->iterate([&](uint8_t* ptr) {
-//       VarLen32 v;
-//       std::memcpy(&v, ptr, sizeof(v));
-//       std::string key = v.str();
-//       size_t bucket_idx = ph->universalHash(key, ph->universalHashA, ph->universalHashB) % bucketSize;
-//       ph->buckets[bucket_idx].keys.push_back(key);
-//    });
-//    ph->constructTable();
-//    return ph;
-// }
 
 lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::construct(const std::vector<std::string>& keys) {
    lingodb::runtime::PerfectHashView* ph = new lingodb::runtime::PerfectHashView();
