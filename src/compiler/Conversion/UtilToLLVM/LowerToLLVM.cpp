@@ -333,6 +333,62 @@ class VarLenTryCheapHashLowering : public OpConversionPattern<util::VarLenTryChe
       return success();
    }
 };
+class HashPerfectLowering : public OpConversionPattern<util::HashPerfect> {
+   public:
+   using OpConversionPattern<util::HashPerfect>::OpConversionPattern;
+   LogicalResult matchAndRewrite(util::HashPerfect op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+      printf("$$$ util HashPerfectLowering\n");
+      auto loc = op->getLoc();
+
+      Value shiftAmount = rewriter.create<mlir::LLVM::ConstantOp>(loc, rewriter.getIntegerType(128), rewriter.getIntegerAttr(rewriter.getIntegerType(128), 64));
+      Value strLen = rewriter.create<LLVM::TruncOp>(loc, rewriter.getI32Type(), adaptor.getVal());
+      Value ptrVal = rewriter.create<LLVM::TruncOp>(loc, rewriter.getI64Type(), rewriter.create<LLVM::LShrOp>(loc, adaptor.getVal(), shiftAmount));
+      auto targetPointerType = mlir::LLVM::LLVMPointerType::get(getContext());
+      auto ptr = rewriter.create<LLVM::IntToPtrOp>(op->getLoc(), targetPointerType, ptrVal);
+      
+      auto i64Type = rewriter.getI64Type();
+      auto i32Type = rewriter.getI32Type();
+      Value indexZero = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(0));
+      Value indexOne = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(1));
+      Value indexTwo = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(2));
+      Value indexThree = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(3));
+      Value lastMask = rewriter.create<mlir::LLVM::ConstantOp>(loc, i32Type, rewriter.getI32IntegerAttr(0x00FFFFFF));
+      Value prime = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(0x7FFFFFFF));
+
+      auto arrType = mlir::LLVM::LLVMArrayType::get(i32Type, 4);
+      Value v1 = rewriter.create<LLVM::LoadOp>(loc, i32Type, ptr);
+      Value p2 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, indexOne});
+      p2.dump();
+      Value v2 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p2);
+      Value p3 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, indexTwo});
+      Value v3 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p3);
+      Value p4 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, indexThree});
+      Value v4 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p4);
+      v4 = rewriter.create<LLVM::AndOp>(loc, v4, lastMask);
+
+
+      Value a = rewriter.create<mlir::LLVM::ZExtOp>(op->getLoc(), i64Type, adaptor.getA());
+      Value b = rewriter.create<mlir::LLVM::ZExtOp>(op->getLoc(), i64Type, adaptor.getB());
+      std::vector units{v1, v2, v3, v4};
+      Value h = indexZero;
+      for (auto v : units) {
+         v = rewriter.create<mlir::LLVM::ZExtOp>(op->getLoc(), i64Type, v);
+         h = rewriter.create<LLVM::MulOp>(loc, h, a);
+         h = rewriter.create<LLVM::AddOp>(loc, h, v);
+         h = rewriter.create<LLVM::AndOp>(loc, h, prime);
+      }
+
+      h = rewriter.create<LLVM::AddOp>(loc, h, b);
+      h = rewriter.create<LLVM::AndOp>(loc, h, prime);
+      h = rewriter.create<LLVM::AddOp>(loc, h, indexOne);
+
+      rewriter.replaceOp(op, h);
+
+      printf("  $$$ util HashPerfectLowering end\n");
+
+      return success();
+   }
+};
 class CreateConstVarLenLowering : public OpConversionPattern<util::CreateConstVarLen> {
    public:
    using OpConversionPattern<util::CreateConstVarLen>::OpConversionPattern;
@@ -570,6 +626,7 @@ void util::populateUtilToLLVMConversionPatterns(LLVMTypeConverter& typeConverter
       MLIRContext* context = &typeConverter.getContext();
       return IntegerType::get(context, 128);
    });
+   patterns.add<HashPerfectLowering>(typeConverter, patterns.getContext());
    patterns.add<CastOpLowering>(typeConverter, patterns.getContext());
    patterns.add<BufferCastOpLowering>(typeConverter, patterns.getContext());
    patterns.add<SizeOfOpLowering>(typeConverter, patterns.getContext());

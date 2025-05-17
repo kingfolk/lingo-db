@@ -73,6 +73,11 @@ def HashCombine : Util_Op<"hash_combine",[Pure]> {
     let results = (outs Index:$hash);
     let assemblyFormat = "$h1 `,` $h2 attr-dict";
 }
+def HashPerfect : Util_Op<"hash_perfect", [Pure]> {
+    let arguments = (ins VarLen32Type: $val, I32: $a, I32: $b);
+    let results = (outs Index : $hash);
+    let assemblyFormat = "$val `:` type($val) $a $b attr-dict";
+}
 def TagPtr : Util_Op<"tag_ptr",[Pure]> {
     let arguments = (ins RefType:$ref,Index:$hash);
     let results = (outs RefType:$res);
