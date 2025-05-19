@@ -2511,15 +2511,24 @@ class LookupPerfectHashTableLowering : public SubOpTupleStreamConsumerConversion
       Value bucketM = unpacked.getResult(2);
       Value bucketOffset = unpacked.getResult(3);
 
-      // // TODO scf::If bucket.m > 1 then calc secondaryHash.
+      Value cmpRight = rewriter.create<arith::ConstantIntOp>(loc, 1, intType);
+      Value hashCollision = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sle, bucketM, cmpRight);
+      Value entryPos = rewriter.create<mlir::scf::IfOp>(
+                     loc, hashCollision, 
+                     [&](mlir::OpBuilder& builder, mlir::Location loc) { 
+                        Value entryPos = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketOffset);
+                        builder.create<mlir::scf::YieldOp>(loc, entryPos);
+                     }, [&](mlir::OpBuilder& builder, mlir::Location loc) {
+                        Value secondaryHash = rewriter.create<db::HashPerfect>(loc, key, bucketHashA, bucketHashB);
+                        bucketM = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketM);
+                        Value entryPos = rewriter.create<arith::RemUIOp>(loc, secondaryHash, bucketM);
+                        bucketOffset = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketOffset);
+                        entryPos = rewriter.create<arith::AddIOp>(loc, entryPos, bucketOffset);
+                        builder.create<mlir::scf::YieldOp>(loc, entryPos);
+                     }
+               ).getResult(0);
 
-      Value secondaryHash = rewriter.create<db::HashPerfect>(loc, key, bucketHashA, bucketHashB);
-      bucketM = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketM);
-      Value entryPos = rewriter.create<arith::RemUIOp>(loc, secondaryHash, bucketM);
-      bucketOffset = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketOffset);
-      entryPos = rewriter.create<arith::AddIOp>(loc, entryPos, bucketOffset);
       Value entry = rewriter.create<util::ArrayElementPtrOp>(loc, entryRefType, table, entryPos);
-
       Value matches = rewriter.create<util::PackOp>(loc, ValueRange{entry, hash});
 
       // auto i8PtrType = util::RefType::get(getContext(), rewriter.getI8Type());
