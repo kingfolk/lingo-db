@@ -26,11 +26,11 @@ private:
 
 class PerfectHashView {
    struct Bucket {
-      std::vector<std::string> keys;
       uint32_t hashA = 0;
       uint32_t hashB = 0;
       uint32_t m = 0;
       uint32_t offset = 0;
+      std::vector<std::string> keys;
    };
 
    struct Entry {

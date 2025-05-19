@@ -2091,6 +2091,7 @@ class ScanPerfectHashTableListLowering : public SubOpConversionPattern<subop::Sc
    using SubOpConversionPattern<subop::ScanListOp>::SubOpConversionPattern;
 
    LogicalResult matchAndRewrite(subop::ScanListOp scanOp, OpAdaptor adaptor, SubOpRewriter& rewriter) const override {
+      printf("*** ScanPerfectHashTableListLowering\n");
       auto listType = mlir::dyn_cast_or_null<subop::ListType>(scanOp.getList().getType());
       if (!listType) return mlir::failure();
       auto lookupRefType = mlir::dyn_cast_or_null<subop::LookupEntryRefType>(listType.getT());
@@ -2119,6 +2120,30 @@ class ScanPerfectHashTableListLowering : public SubOpConversionPattern<subop::Sc
             builder1.create<mlir::scf::YieldOp>(loc);
          });
 
+
+      // auto loc = scanOp->getLoc();
+      // auto unpacked = rewriter.create<util::UnPackOp>(loc, adaptor.getList());
+      // auto ptr = unpacked.getResult(0);
+      // auto hash = unpacked.getResult(1);
+      // ptr.dump();
+      // ptr.getType().dump();
+      // hash.dump();
+      // hash.getType().dump();
+      // auto referenceType = mlir::cast<subop::ListType>(scanOp.getList().getType()).getT();
+      // auto tupleType = mlir::TupleType::get(getContext(), unpackTypes(referenceType.getMembers().getTypes()));
+      // referenceType.dump();
+      // tupleType.dump();
+      // Value castedPtr = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(getContext(), mlir::TupleType::get(getContext(), {rewriter.getIndexType(), rewriter.getIndexType(), tupleType})), ptr);
+      // printf("*** castedPtr\n");
+      // castedPtr.dump();
+      // castedPtr.getType().dump();
+      // Value valuePtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), tupleType), castedPtr, 2);
+
+      // ColumnMapping mapping;
+      
+      // mapping.define(scanOp.getElem(), valuePtr);
+      // rewriter.replaceTupleStream(scanOp, mapping);
+      printf("  *** ScanPerfectHashTableListLowering done\n");
       return success();
    }
 };
@@ -2453,83 +2478,65 @@ class LookupPerfectHashTableLowering : public SubOpTupleStreamConsumerConversion
       // Value ref = rewriter.create<util::CreateConstVarLen>(loc, util::VarLen32Type::get(rewriter.getContext()), rewriter.getStringAttr("Clerk#000000536"));
 
 
-      // Value hash = rt::PerfectHashView::computeHash(rewriter, loc)({adaptor.getState(), ref})[0];
-
-      auto bucketsType = util::RefType::get(context, util::RefType::get(context, rewriter.getI8Type()));
-      auto tableType = util::RefType::get(context, util::RefType::get(context, rewriter.getI8Type()));
       auto intType = mlir::IntegerType::get(rewriter.getContext(), 32);
-      Value castedPointer = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(context, TupleType::get(context, {bucketsType, tableType, intType, intType, intType, intType, intType})), adaptor.getState());
-      auto loaded = rewriter.create<util::LoadOp>(loc, mlir::cast<util::RefType>(castedPointer.getType()).getElementType(), castedPointer, Value());
+      auto bigIntType = rewriter.getI64Type();
+      // fake std::vector type. {ptr, size, cap}
+      auto vectorType = TupleType::get(context, {bigIntType, bigIntType, bigIntType});
+      auto bucketType = TupleType::get(context, {intType, intType, intType, intType, vectorType});
+      auto bucketRefType = util::RefType::get(context, bucketType);
+      auto entryType = TupleType::get(context, {bigIntType, bigIntType, bigIntType, bigIntType});
+      auto entryRefType = util::RefType::get(context, entryType);
+
+      auto htType = TupleType::get(context, {bucketRefType, entryRefType, intType, intType, intType, intType, intType});
+      Value htPtr = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(context, htType), adaptor.getState());
+      auto loaded = rewriter.create<util::LoadOp>(loc, htType, htPtr);
+      adaptor.getState().dump();
+      adaptor.getState().getType().dump();
       auto unpacked = rewriter.create<util::UnPackOp>(loc, loaded);
       Value universalHashA = unpacked.getResult(2);
       Value universalHashB = unpacked.getResult(3);
       Value hash = rewriter.create<db::HashPerfect>(loc, key, universalHashA, universalHashB);
-      // Value bucket = rt::PerfectHashView::computeBucket(rewriter, loc)({adaptor.getState(), hash})[0];
-      // Value ptr = rt::PerfectHashView::computeEntry(rewriter, loc)({adaptor.getState(), hash, bucket})[0];
-      // hash = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), hash);
 
-      // TODO replace with db::PerfectHash
-      // auto lowerHash = [&](Value key) {
-      //    Value v = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(context, TupleType::get(context, {bucketsType, tableType, intType, intType, intType, intType, intType})), adaptor.getState());
-      //    mlir::dyn_cast<>
-      // };
-      // Value hash = rewriter.create<arith::ConstantIndexOp>(loc, rewriter.getIndexType(), 1);
-      // auto bucketsType = util::RefType::get(context, util::RefType::get(context, rewriter.getI8Type()));
-      // auto tableType = util::RefType::get(context, util::RefType::get(context, rewriter.getI8Type()));
-      // auto intType = mlir::IntegerType::get(rewriter.getContext(), 32);
-      // Value castedPointer = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(context, TupleType::get(context, {bucketsType, tableType, intType, intType, intType, intType, intType})), adaptor.getState());
-      // auto loaded = rewriter.create<util::LoadOp>(loc, mlir::cast<util::RefType>(castedPointer.getType()).getElementType(), castedPointer, Value());
-      // auto unpacked = rewriter.create<util::UnPackOp>(loc, loaded);
       Value buckets = unpacked.getResult(0);
       Value table = unpacked.getResult(1);
       Value bucketSize = unpacked.getResult(6);
-      Value tableSize = unpacked.getResult(4);
       bucketSize = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketSize);
+      // Value bucketSize = rewriter.create<arith::ConstantIndexOp>(loc, 1);
       Value buckedPos = rewriter.create<arith::RemUIOp>(loc, hash, bucketSize);
-      Value bucket = rewriter.create<util::LoadOp>(loc, util::RefType::get(getContext(), rewriter.getI8Type()), buckets, buckedPos);
 
-      // TODO bucket get hashA, hashB to calculate secondaryHash
-      // Value secondaryHash = rewriter.create<arith::ConstantIndexOp>(loc, rewriter.getIndexType(), 2);
-      Value bucketM = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 1);
-      Value bucketOffset = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 1);
-      // Value entryPos = rewriter.create<arith::RemUIOp>(loc, secondaryHash, bucketM);
-      Value entryPos = rewriter.create<arith::RemUIOp>(loc, hash, bucketM);
+      Value bucketTpl = rewriter.create<util::LoadOp>(loc, bucketType, buckets, buckedPos);
+      unpacked = rewriter.create<util::UnPackOp>(loc, bucketTpl);
+      Value bucketHashA = unpacked.getResult(0);
+      Value bucketHashB = unpacked.getResult(1);
+      Value bucketM = unpacked.getResult(2);
+      Value bucketOffset = unpacked.getResult(3);
+
+      // // TODO scf::If bucket.m > 1 then calc secondaryHash.
+
+      Value secondaryHash = rewriter.create<db::HashPerfect>(loc, key, bucketHashA, bucketHashB);
+      bucketM = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketM);
+      Value entryPos = rewriter.create<arith::RemUIOp>(loc, secondaryHash, bucketM);
+      bucketOffset = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), bucketOffset);
       entryPos = rewriter.create<arith::AddIOp>(loc, entryPos, bucketOffset);
-      Value entry = rewriter.create<util::LoadOp>(loc, util::RefType::get(getContext(), rewriter.getI8Type()), table, entryPos);
+      Value entry = rewriter.create<util::ArrayElementPtrOp>(loc, entryRefType, table, entryPos);
 
       Value matches = rewriter.create<util::PackOp>(loc, ValueRange{entry, hash});
 
-
-
-
-      // TODO this is a WIP IR solution
-      // auto htType = util::RefType::get(context, util::RefType::get(context, rewriter.getI8Type()));
-      // Value castedPointer = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(context, TupleType::get(context, {htType})), adaptor.getState());
-      // auto loaded = rewriter.create<util::LoadOp>(loc, mlir::cast<util::RefType>(castedPointer.getType()).getElementType(), castedPointer, Value());
-      // auto unpacked = rewriter.create<util::UnPackOp>(loc, loaded);
-      // // Value ht = unpacked.getResult(0);
-      // // Value ptr = rewriter.create<util::LoadOp>(loc, util::RefType::get(getContext(), rewriter.getI8Type()), ht, buckedPos);
-      // Value ptr = unpacked.getResult(0);
-      // // Value buckedPos = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 0);
-      // // Value hash = rewriter.create<arith::ConstantOp>(loc, rewriter.getI64Type(), rewriter.getIntegerAttr(rewriter.getI64Type(), 0));
-      // // Value one = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 1);
-      // Value castedPtr = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(getContext(), mlir::TupleType::get(getContext(), {rewriter.getI1Type(), rewriter.getIndexType()})), ptr);
-      // Value hashPtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), rewriter.getIndexType()), castedPtr, 1);
-      // mlir::Value hash = rewriter.create<util::LoadOp>(loc, hashPtr, mlir::Value());
-
-      // TODO DELETE THIS DRY RUN
-      // Value ptr = rt::PerfectHashView::dryRun(rewriter, loc)({adaptor.getState()})[0];
-      // Value hash = rt::PerfectHashView::dryRunHash(rewriter, loc)({adaptor.getState()})[0];
+      // auto i8PtrType = util::RefType::get(getContext(), rewriter.getI8Type());
+      // Value arg1 = rewriter.create<util::AllocOp>(loc, util::RefType::get(i8PtrType), rewriter.create<mlir::arith::ConstantIndexOp>(loc, 16));
+      // rewriter.create<util::StoreOp>(loc, key, arg1, mlir::Value());
+      // Value hash = rt::PerfectHashView::computeHash(rewriter, loc)({adaptor.getState(), arg1})[0];
+      // Value bucket = rt::PerfectHashView::computeBucket(rewriter, loc)({adaptor.getState(), hash})[0];
+      // Value ptr = rt::PerfectHashView::computeEntry(rewriter, loc)({adaptor.getState(), arg1, bucket})[0];
       // hash = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), hash);
-
-      // TODO DELETE THIS DRY RUN ONE CALL
-      // Value ptr = rt::PerfectHashView::dryRun(rewriter, loc)({adaptor.getState()})[0];
-      // Value castedPtr = rewriter.create<util::GenericMemrefCastOp>(loc, util::RefType::get(getContext(), mlir::TupleType::get(getContext(), {rewriter.getI1Type(), rewriter.getIndexType()})), ptr);
-      // Value hashPtr = rewriter.create<util::TupleElementPtrOp>(loc, util::RefType::get(getContext(), rewriter.getIndexType()), castedPtr, 1);
-      // mlir::Value hash = rewriter.create<util::LoadOp>(loc, hashPtr, mlir::Value());
-
+      // printf("!!! hash\n");
+      // bucket.dump();
+      // bucket.getType().dump();
+      // hash.dump();
+      // hash.getType().dump();
+      // ptr.dump();
+      // ptr.getType().dump();
       // Value matches = rewriter.create<util::PackOp>(loc, ValueRange{ptr, hash});
-
 
       // scf::if bucket.m == 1
       //   ptr = table[bucket.offset]
