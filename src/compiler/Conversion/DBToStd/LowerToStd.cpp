@@ -901,12 +901,55 @@ public:
    LogicalResult matchAndRewrite(Operation* op, ArrayRef<Value> operands, ConversionPatternRewriter& rewriter) const override {
       db::HashPerfectAdaptor hashAdaptor(operands);
       auto val = hashAdaptor.getVal();
-      auto a = hashAdaptor.getA();
-      auto b = hashAdaptor.getB();
-      mlir::Value hash = rewriter.create<util::HashPerfect>(op->getLoc(), rewriter.getIndexType(), val, a, b);
-      
+      // Another try: low performance maybe cause memory unaligned. 15bytes string will be divided to 
+      // [0,4), [4,8), [8,12), [11,15), last [11,15) is not aligned.
+      // auto loc = op->getLoc();
+      // mlir::Value h = rewriter.create<arith::ConstantOp>(loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(0));
+      // mlir::Value offset = rewriter.create<arith::ConstantOp>(loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(0));
+      // std::vector<mlir::Type> loopCarriedTypes{h.getType(), offset.getType()};
+      // std::vector<mlir::Value> loopCarriedInitials{h, offset};;
 
-      rewriter.replaceOp(op, hash);
+      // // strLen = 15 - 4
+      // Value strLen = rewriter.create<arith::ConstantOp>(loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(11));
+      // Value step = rewriter.create<arith::ConstantOp>(loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(4));
+      // auto whileOp = rewriter.create<mlir::scf::WhileOp>(loc, loopCarriedTypes, loopCarriedInitials);
+      // Block* before = new Block;
+      // Block* after = new Block;
+      // whileOp.getBefore().push_back(before);
+      // whileOp.getAfter().push_back(after);
+      // before->addArguments(loopCarriedTypes, {loc, loc});
+      // after->addArguments(loopCarriedTypes, {loc, loc});
+
+      // {
+      //    mlir::OpBuilder::InsertionGuard guard(rewriter);
+      //    rewriter.setInsertionPointToStart(before);
+      //    mlir::Value offset = before->getArgument(1);
+      //    mlir::Value cond = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sle, offset, strLen);
+      //    rewriter.create<mlir::scf::ConditionOp>(loc, cond, before->getArguments());
+      // }
+      // {
+      //    mlir::OpBuilder::InsertionGuard guard(rewriter);
+      //    rewriter.setInsertionPointToStart(after);
+      //    mlir::Value h = after->getArgument(0);
+      //    mlir::Value offset = after->getArgument(1);
+      //    h = rewriter.create<util::HashPerfectStep>(loc, rewriter.getIndexType(), val, a, b, h, offset);
+      //    offset = rewriter.create<arith::AddIOp>(loc, offset, step);
+      //    std::vector<mlir::Value> res{rewriter.create<mlir::arith::IndexCastOp>(loc, rewriter.getI64Type(), h), offset};
+      //    rewriter.create<scf::YieldOp>(loc, res);
+      // }
+
+      // mlir::Value one = rewriter.create<arith::ConstantOp>(loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(1));
+      // offset = rewriter.create<arith::SubIOp>(loc, whileOp.getResult(1), one);
+      // h = rewriter.create<util::HashPerfectStep>(loc, rewriter.getIndexType(), val, a, b, whileOp.getResult(0), offset);
+
+      // Value prime = rewriter.create<arith::ConstantIndexOp>(loc, 0x7FFFFFFF);
+      // b = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), b);
+      // Value indexOne = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+      // h = rewriter.create<arith::AddIOp>(loc, h, b);
+      // h = rewriter.create<arith::AndIOp>(loc, h, prime);
+      // h = rewriter.create<arith::AddIOp>(loc, h, indexOne);
+
+      // rewriter.replaceOp(op, h);
       return success();
    }
 };
