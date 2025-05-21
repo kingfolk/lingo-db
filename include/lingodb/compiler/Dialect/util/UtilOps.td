@@ -83,6 +83,16 @@ def HashPerfectStep : Util_Op<"hash_perfect_step", [Pure]> {
     let results = (outs Index : $hash);
     let assemblyFormat = "$val `:` type($val) $a $b $h $offset attr-dict";
 }
+def HashPerfectFetch : Util_Op<"hash_perfect_fetch", [Pure]> {
+    let arguments = (ins VarLen32Type: $val, I64: $offset);
+    let results = (outs I64 : $res);
+    let assemblyFormat = "$val `:` type($val) $offset attr-dict";
+}
+def HashPerfectLen : Util_Op<"hash_perfect_len", [Pure]> {
+    let arguments = (ins VarLen32Type: $val);
+    let results = (outs I64 : $res);
+    let assemblyFormat = "$val `:` type($val) attr-dict";
+}
 def TagPtr : Util_Op<"tag_ptr",[Pure]> {
     let arguments = (ins RefType:$ref,Index:$hash);
     let results = (outs RefType:$res);

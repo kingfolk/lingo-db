@@ -55,6 +55,15 @@ size_t lingodb::runtime::PerfectHashView::universalHash(const std::string& key, 
 
    // deal with not mutiply of 4 part
    size_t restLen = keyLen - i;
+   // TODO DELETE THIS. unaligned memory fetch make it slow
+   // i is index of last 4 bytes start index
+   // i -= (4-restLen);
+   // if (restLen != 0) {
+   //    uint32_t c;
+   //    std::memcpy(&c, keyPtr+i, sizeof(uint32_t));
+   //    hash = (hash * a + c) & prime;
+   // }
+
    if (restLen == 3) {
       uint32_t c;
       std::memcpy(&c, keyPtr+i, sizeof(uint32_t));

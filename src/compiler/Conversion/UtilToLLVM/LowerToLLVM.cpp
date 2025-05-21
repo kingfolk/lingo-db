@@ -368,6 +368,43 @@ class HashPerfectStepLowering : public OpConversionPattern<util::HashPerfectStep
       return success();
    }
 };
+class HashPerfectFetchLowering : public OpConversionPattern<util::HashPerfectFetch> {
+   public:
+   using OpConversionPattern<util::HashPerfectFetch>::OpConversionPattern;
+   LogicalResult matchAndRewrite(util::HashPerfectFetch op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+      auto loc = op->getLoc();
+
+      Value shiftAmount = rewriter.create<mlir::LLVM::ConstantOp>(loc, rewriter.getIntegerType(128), rewriter.getIntegerAttr(rewriter.getIntegerType(128), 64));
+      Value ptrVal = rewriter.create<LLVM::TruncOp>(loc, rewriter.getI64Type(), rewriter.create<LLVM::LShrOp>(loc, adaptor.getVal(), shiftAmount));
+      auto targetPointerType = mlir::LLVM::LLVMPointerType::get(getContext());
+      auto ptr = rewriter.create<LLVM::IntToPtrOp>(op->getLoc(), targetPointerType, ptrVal);
+
+      auto i32Type = rewriter.getI32Type();
+      auto i64Type = rewriter.getI64Type();
+      auto arrType = mlir::LLVM::LLVMArrayType::get(i32Type, 4);
+      Value indexZero = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(0));
+
+      Value offset = op.getOffset();
+      Value p = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, offset});
+      Value v = rewriter.create<LLVM::LoadOp>(loc, i32Type, p);
+      v = rewriter.create<mlir::LLVM::ZExtOp>(op->getLoc(), i64Type, v);
+
+      rewriter.replaceOp(op, v);
+      return success();
+   }
+};
+class HashPerfectLenLowering : public OpConversionPattern<util::HashPerfectLen> {
+   public:
+   using OpConversionPattern<util::HashPerfectLen>::OpConversionPattern;
+   LogicalResult matchAndRewrite(util::HashPerfectLen op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+      auto loc = op->getLoc();
+      Value strLen = rewriter.create<LLVM::TruncOp>(loc, rewriter.getI32Type(), adaptor.getVal());
+      strLen = rewriter.create<mlir::LLVM::ZExtOp>(loc, rewriter.getI64Type(), strLen);
+      rewriter.replaceOp(op, strLen);
+
+      return success();
+   }
+};
 class HashPerfectLowering : public OpConversionPattern<util::HashPerfect> {
    public:
    using OpConversionPattern<util::HashPerfect>::OpConversionPattern;
@@ -663,6 +700,8 @@ void util::populateUtilToLLVMConversionPatterns(LLVMTypeConverter& typeConverter
    });
    patterns.add<HashPerfectLowering>(typeConverter, patterns.getContext());
    patterns.add<HashPerfectStepLowering>(typeConverter, patterns.getContext());
+   patterns.add<HashPerfectFetchLowering>(typeConverter, patterns.getContext());
+   patterns.add<HashPerfectLenLowering>(typeConverter, patterns.getContext());
    patterns.add<CastOpLowering>(typeConverter, patterns.getContext());
    patterns.add<BufferCastOpLowering>(typeConverter, patterns.getContext());
    patterns.add<SizeOfOpLowering>(typeConverter, patterns.getContext());
