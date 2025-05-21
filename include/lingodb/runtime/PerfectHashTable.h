@@ -72,23 +72,6 @@ public:
    static lingodb::runtime::PerfectHashView* build(FlexibleBuffer* keyValues, VarLen32 paramValues);
    static lingodb::runtime::PerfectHashView* construct(const std::vector<std::string>& keys);
    lingodb::runtime::PerfectHashView* constructUp(const std::vector<std::string>& keys);
-
-   // IR LOGIC
-   // keyHash1 = universalHash(key, a, b)
-   // bukcetPos = keyHash1 % buckets.size()
-   // bucket = buckets[bukcetPos]
-   // if bucket.m == 1:
-   //   if bucket has key and table[0].hash1 == keyHash1:
-   //    if table[0].key == key:
-   //      materialize true
-   // else:
-   //   keyHash2 = universalHash(key, bucket.a, bucket.b)
-   //   tablePos = keyHash2 % bucket.m + bucket.offset
-   //   slot = table[tablePos]
-   //   if slot.hash1 == keyHash1 && slot.hash2 == keyHash2
-   //    if slot.key == key
-   //      materialize true
-   
    
    size_t computeHash(uint8_t* keyPtr) {
       lingodb::runtime::VarLen32 key;
@@ -115,46 +98,6 @@ public:
       auto& entry = table[pos];
       return &entry;
    }
-
-   // size_t computeSecondaryHash(uint8_t* keyPtr, Bucket& bucket) {
-   //    lingodb::runtime::VarLen32 key;
-   //    std::memcpy(&key, keyPtr, sizeof(key));
-   //    return universalHash(key, bucket.hashA, bucket.hashB);
-   // }
-
-
-   // // TODO
-   // void* containHash(size_t hash, size_t secondaryHash) {
-   //    size_t bucket_idx = hash % table.size();
-   //    const auto& bucket = buckets[bucket_idx];
-      
-   //    size_t pos = (secondaryHash % bucket.m) + bucket.offset;
-   //    auto& entry = table[pos];
-   //    return &entry;
-   // }
-   // void* containHash(size_t hash) {
-   //    size_t bucket_idx = hash % table.size();
-   //    const auto& bucket = buckets[bucket_idx];
-   //    auto& entry = table[bucket.offset];
-   //    return &entry;
-   // }
-
-   // // 查找键
-   // bool contains(const std::string& key) const {
-   //    if (table.empty()) return false;
-
-   //    // 第一级哈希确定桶
-   //    size_t bucket_idx = universalHash(key, universalHashA, universalHashB) % buckets.size();
-   //    const auto& bucket = buckets[bucket_idx];
-
-   //    if (bucket.keys.empty()) return false;
-
-   //    // 第二级哈希查找精确位置
-   //    size_t pos =    secondaryHash(key, bucket);
-   //    if (pos >= tableSize) return false;
-
-   //    return table[pos] == bucket_idx;
-   // }
 
    size_t size() const {
       return tableSize;

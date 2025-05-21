@@ -337,7 +337,6 @@ class HashPerfectStepLowering : public OpConversionPattern<util::HashPerfectStep
    public:
    using OpConversionPattern<util::HashPerfectStep>::OpConversionPattern;
    LogicalResult matchAndRewrite(util::HashPerfectStep op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
-      printf("$$$ util HashPerfectStepLowering\n");
       auto loc = op->getLoc();
 
       Value shiftAmount = rewriter.create<mlir::LLVM::ConstantOp>(loc, rewriter.getIntegerType(128), rewriter.getIntegerAttr(rewriter.getIntegerType(128), 64));
@@ -430,13 +429,32 @@ class HashPerfectLowering : public OpConversionPattern<util::HashPerfect> {
       auto arrType = mlir::LLVM::LLVMArrayType::get(i32Type, 4);
       Value v1 = rewriter.create<LLVM::LoadOp>(loc, i32Type, ptr);
       Value p2 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, indexOne});
-      p2.dump();
       Value v2 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p2);
       Value p3 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, indexTwo});
       Value v3 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p3);
       Value p4 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, indexThree});
       Value v4 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p4);
       v4 = rewriter.create<LLVM::AndOp>(loc, v4, lastMask);
+
+      // auto i64Type = rewriter.getI64Type();
+      // auto i32Type = rewriter.getI32Type();
+      // Value indexZero = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(0));
+      // Value indexOne = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(1));
+      // Value prime = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(0x7FFFFFFF));
+
+      // auto arrType = mlir::LLVM::LLVMArrayType::get(rewriter.getI8Type(), 4);
+      // Value v1 = rewriter.create<LLVM::LoadOp>(loc, i32Type, ptr);
+      // Value offset = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(4));
+      // Value p2 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, offset});
+      // Value v2 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p2);
+
+      // offset = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(8));
+      // Value p3 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, offset});
+      // Value v3 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p3);
+
+      // offset = rewriter.create<mlir::LLVM::ConstantOp>(loc, i64Type, rewriter.getI64IntegerAttr(11));
+      // Value p4 = rewriter.create<LLVM::GEPOp>(op->getLoc(), targetPointerType, arrType, ptr, ValueRange{indexZero, offset});
+      // Value v4 = rewriter.create<LLVM::LoadOp>(loc, i32Type, p4);
 
 
       Value a = rewriter.create<mlir::LLVM::ZExtOp>(op->getLoc(), i64Type, adaptor.getA());

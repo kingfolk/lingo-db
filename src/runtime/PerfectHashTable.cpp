@@ -9,7 +9,6 @@
 #include <cstring>
 
 void lingodb::runtime::PerfectHashView::constructTable() {
-      // 5. 构建最终哈希表
    Entry emptyEntry;
    emptyEntry.hash = 0;
    emptyEntry.secondaryHash = 0;
@@ -138,7 +137,6 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(Flex
    ph->buckets.reserve(bucketSize);
    ph->bucketSize = bucketSize;
    Bucket b;
-   printf("~~~ PerfectHashView::build %lu\n", bucketSize);
    auto readUint32FromPtr = [&](uint8_t* ptr, uint32_t& v) {
       std::memcpy(&v, ptr, sizeof(v));
       return ptr + 4;
@@ -156,7 +154,7 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::build(Flex
       ph->buckets.push_back(b);
    }
 
-   printf("~~~ prime %lu, a %lu, b %lu, tableSize %lu\n", ph->prime, ph->universalHashA, ph->universalHashB, ph->tableSize);
+   // printf("~~~ prime %lu, a %lu, b %lu, tableSize %lu\n", ph->prime, ph->universalHashA, ph->universalHashB, ph->tableSize);
 
    keyValues->iterate([&](uint8_t* ptr) {
       VarLen32 v;
@@ -188,13 +186,13 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::constructU
 
    auto timeStart = std::chrono::high_resolution_clock::now();
 
-   // 1. 选择通用哈希函数的参数和质数
+   // 1. prime for proper size
    prime = nextPrime(keys.size() * keys.size());
 
    universalHashA = random(prime - 1) + 1;
    universalHashB = random(prime);
 
-   // 2. 第一级哈希：将键分配到桶中
+   // 2. first hash: distribute entry into bucket
    size_t bucketSize = keys.size();
    buckets.resize(bucketSize);
 
@@ -203,24 +201,11 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::constructU
       buckets[bucket_idx].keys.push_back(key);
    }
 
-   auto hashEnd = std::chrono::high_resolution_clock::now();
-   auto p1 = std::chrono::duration_cast<std::chrono::microseconds>(hashEnd - timeStart).count() / 1000.0;
-   printf("--- hash calc: %lf\n", p1);
-
-   // 3. 计算第二级哈希表的大小
-   // size_t total_slots = 0;
-   // for (const auto& bucket : buckets) {
-   //    size_t m = bucket.keys.size() * bucket.keys.size();
-   //    if (m == 0) m = 1; // 空桶至少一个槽位
-   //    total_slots += m;
-   // }
-   // tableSize = nextPrime(total_slots);
-
-   // 4. 为每个桶找到无冲突的哈希参数
+   // 3. resolve hash collision. generate hash param for every bucket
    size_t offset = 0;
    for (auto& bucket : buckets) {
       size_t m = bucket.keys.size() * bucket.keys.size();
-      if (m == 0) m = 1; // 空桶至少一个槽位
+      if (m == 0) m = 1; // empty table take one entry
 
       bucket.offset = offset;
       if (!bucket.keys.empty()) {
@@ -233,21 +218,14 @@ lingodb::runtime::PerfectHashView* lingodb::runtime::PerfectHashView::constructU
    }
    tableSize = offset;
 
-   printf("<<< keys.size() %lu, prime %lu, a %lu, b %lu, tableSize %lu\n", keys.size(), prime, universalHashA, universalHashB, tableSize);
+   // printf("<<< keys.size() %lu, prime %lu, a %lu, b %lu, tableSize %lu\n", keys.size(), prime, universalHashA, universalHashB, tableSize);
 
-   auto collideEnd = std::chrono::high_resolution_clock::now();
-   auto p3 = std::chrono::duration_cast<std::chrono::microseconds>(collideEnd - hashEnd).count() / 1000.0;
-   printf("--- collide calc: %lf\n", p3);
-
+   // 4. finalize and fill in table(secondary hash)
    constructTable();
-
-   auto constructEnd = std::chrono::high_resolution_clock::now();
-   auto p4 = std::chrono::duration_cast<std::chrono::microseconds>(constructEnd - collideEnd).count() / 1000.0;
-   printf("--- table construct calc: %lf\n", p4);
 
    auto timeEnd = std::chrono::high_resolution_clock::now();
    auto p5 = std::chrono::duration_cast<std::chrono::microseconds>(timeEnd - timeStart).count() / 1000.0;
-   printf("--- all construct calc: %lf\n", p5);
+   printf("--- construct perfect hash cost: %lf\n", p5);
 
    return this;
 }

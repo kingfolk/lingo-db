@@ -1054,22 +1054,7 @@ static mlir::Value translateHJ(mlir::Value left, mlir::Value right, mlir::ArrayA
    auto valueColumns = columns;
    valueColumns.remove(keyColumns);
    MaterializationHelper valueHelper(valueColumns, rewriter.getContext());
-
-   mlir::OpPrintingFlags flags;
-   flags.assumeVerified();
-   // right.print(llvm::outs(), flags);
-   // auto rightType = right.getType();
-   // rightType.print(llvm::outs());
-   auto genOp = mlir::cast<subop::GenerateOp>(right.getDefiningOp());
-   // gg.print(llvm::outs(), flags);
-   // printf("\n-------\n");
-   // gg.getGeneratedColumns().print(llvm::outs());
-   // printf("\n-------\n");
-   // auto it = gg.getGeneratedColumns().begin();
-   auto genCol = mlir::cast<tuples::ColumnDefAttr>(*genOp.getGeneratedColumns().begin());
-   auto colName = genCol.getName().getLeafReference().str();
-   bool mapFixed = colName == "const0";
-   auto multiMapType = subop::MultiMapType::get(rewriter.getContext(), keyHelper.createStateMembersAttr(), valueHelper.createStateMembersAttr(), mapFixed);
+   auto multiMapType = subop::MultiMapType::get(rewriter.getContext(), keyHelper.createStateMembersAttr(), valueHelper.createStateMembersAttr());
    mlir::Value multiMap = rewriter.create<subop::GenericCreateOp>(loc, multiMapType);
    auto insertOp = rewriter.create<subop::InsertOp>(loc, right, multiMap, keyHelper.createColumnstateMapping(valueHelper.createColumnstateMapping().getValue()));
    insertOp.getEqFn().push_back(createEqFn(rewriter, hashRight, hashRight, nullsEqual, loc));
@@ -1226,7 +1211,7 @@ static std::pair<mlir::Value, mlir::Value> translateHJWithMarker(mlir::Value lef
    valueColumns.remove(keyColumns);
    MaterializationHelper valueHelper(valueColumns, rewriter.getContext());
    auto flagMember = valueHelper.addFlag(markerDefAttr);
-   auto multiMapType = subop::MultiMapType::get(rewriter.getContext(), keyHelper.createStateMembersAttr(), valueHelper.createStateMembersAttr(), false);
+   auto multiMapType = subop::MultiMapType::get(rewriter.getContext(), keyHelper.createStateMembersAttr(), valueHelper.createStateMembersAttr());
    mlir::Value multiMap = rewriter.create<subop::GenericCreateOp>(loc, multiMapType);
    left = mapBool(left, rewriter, loc, false, &markerDefAttr.getColumn());
    auto insertOp = rewriter.create<subop::InsertOp>(loc, left, multiMap, keyHelper.createColumnstateMapping(valueHelper.createColumnstateMapping().getValue()));

@@ -209,8 +209,6 @@ class MultiMapAsHashIndexedView : public mlir::RewritePattern {
       rewriter.eraseOp(insertOp);
       transformer.updateValue(state, buffer.getType());
       rewriter.replaceOp(createOp, buffer);
-      // printf("--- rewriter.getBlock().dump() ---\n");
-      // rewriter.getBlock()->dump();
       return mlir::success();
    }
 };
@@ -224,6 +222,7 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
       auto& memberManager = getContext()->getLoadedDialect<subop::SubOperatorDialect>()->getMemberManager();
       auto& columnManager = getContext()->getLoadedDialect<tuples::TupleStreamDialect>()->getColumnManager();
 
+      auto timeStart = std::chrono::high_resolution_clock::now();
       auto createOp = mlir::cast<subop::GenericCreateOp>(op);
       auto state = createOp.getRes();
       auto multiMapType = mlir::dyn_cast_or_null<subop::MultiMapType>(state.getType());
@@ -246,8 +245,6 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
             otherUses.push_back(u);
          }
       }
-      // TODO getFixed is not needed
-      // printf("*** multiMapType.getFixed() %d\n", multiMapType.getFixed());
       auto generateOp = mlir::dyn_cast_or_null<subop::GenerateOp>(insertOp.getStream().getDefiningOp());
       if (!generateOp) {
          return mlir::failure();
@@ -418,6 +415,10 @@ class MultiMapAsPerfectHashView : public mlir::RewritePattern {
       // rewriter.replaceOp(createOp, buffer);
       // printf("--- rewriter.getBlock().dump() ---\n");
       // rewriter.getBlock()->dump();
+
+      auto timeEnd = std::chrono::high_resolution_clock::now();
+      auto p1 = std::chrono::duration_cast<std::chrono::microseconds>(timeEnd - timeStart).count() / 1000.0;
+      printf("--- lower calc: %lf\n", p1);
       return mlir::success();
    }
 };
@@ -511,6 +512,7 @@ class SpecializeSubOpPass : public mlir::PassWrapper<SpecializeSubOpPass, mlir::
       registry.insert<util::UtilDialect, db::DBDialect>();
    }
    void runOnOperation() override {
+      auto t1 = std::chrono::high_resolution_clock::now();
       //transform "standalone" aggregation functions
       auto columnUsageAnalysis = getAnalysis<subop::ColumnUsageAnalysis>();
 
@@ -525,6 +527,10 @@ class SpecializeSubOpPass : public mlir::PassWrapper<SpecializeSubOpPass, mlir::
       if (mlir::applyPatternsGreedily(getOperation().getRegion(), std::move(patterns)).failed()) {
          assert(false && "should not happen");
       }
+
+      auto t2 = std::chrono::high_resolution_clock::now();
+      auto p1 = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0;
+      printf("--- SpecializeSubOpPass %lf\n", p1);
    }
 };
 } // end anonymous namespace
